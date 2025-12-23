@@ -1,5 +1,6 @@
 import { tick, getState } from './state.js'
-import { broadcast } from '../websocket/server.js'
+import { broadcastToMatch } from '../websocket/server.js'
+import { getAllMatches } from '../match/manager.js'
 import type { StateMessage } from '../../types.js'
 
 const TICK_RATE = 30 // Hz
@@ -13,14 +14,19 @@ export function startGameLoop(): void {
   console.log(`[GAME] Starting game loop at ${TICK_RATE} Hz`)
 
   loopInterval = setInterval(() => {
-    tick()
+    // Update all active matches
+    for (const match of getAllMatches()) {
+      tick(match.matchId)
 
-    const message: StateMessage = {
-      type: 'STATE',
-      state: getState(),
+      const state = getState(match.matchId)
+      if (state) {
+        const message: StateMessage = {
+          type: 'STATE',
+          state,
+        }
+        broadcastToMatch(match.matchId, message)
+      }
     }
-
-    broadcast(message)
   }, TICK_INTERVAL)
 }
 
@@ -31,4 +37,3 @@ export function stopGameLoop(): void {
     console.log('[GAME] Game loop stopped')
   }
 }
-

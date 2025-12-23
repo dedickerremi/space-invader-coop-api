@@ -1,25 +1,42 @@
 import type { ClientMessage } from '../../types.js'
-import { setPlayerDirection, playerShoot } from '../game/state.js'
+import { setPlayerDirection, playerShoot, pauseGame, resumeGame } from '../game/state.js'
 
-export function handleMessage(playerId: string, data: unknown): void {
+export type HandleResult = {
+  action: 'none' | 'exit'
+}
+
+export function handleMessage(matchId: string, playerId: string, data: unknown): HandleResult {
   if (!isValidMessage(data)) {
     console.warn(`[WS] Invalid message from ${playerId}:`, data)
-    return
+    return { action: 'none' }
   }
 
   switch (data.type) {
     case 'MOVE':
-      setPlayerDirection(playerId, data.dir)
+      setPlayerDirection(matchId, playerId, data.dir)
       break
 
     case 'STOP':
-      setPlayerDirection(playerId, 0)
+      setPlayerDirection(matchId, playerId, 0)
       break
 
     case 'SHOOT':
-      playerShoot(playerId)
+      playerShoot(matchId, playerId)
       break
+
+    case 'PAUSE':
+      pauseGame(matchId, playerId)
+      break
+
+    case 'RESUME':
+      resumeGame(matchId, playerId)
+      break
+
+    case 'EXIT':
+      return { action: 'exit' }
   }
+
+  return { action: 'none' }
 }
 
 function isValidMessage(data: unknown): data is ClientMessage {
@@ -32,9 +49,11 @@ function isValidMessage(data: unknown): data is ClientMessage {
       return msg.dir === -1 || msg.dir === 1
     case 'STOP':
     case 'SHOOT':
+    case 'PAUSE':
+    case 'RESUME':
+    case 'EXIT':
       return true
     default:
       return false
   }
 }
-
