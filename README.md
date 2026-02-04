@@ -1,1 +1,0 @@
-# space-invader-coop-api

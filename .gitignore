@@ -1,15 +1,9 @@
-# Dependencies
-node_modules/
+# Binary
+backend-go-bin
+*.exe
 
-# Build output
-dist/
-
-# Logs
-*.log
-
-# Environment
-.env
-.env.local
+# Go workspace
+go.work
 
 # IDE
 .idea/
@@ -19,5 +13,3 @@ dist/
 
 # OS
 .DS_Store
-Thumbs.db
-
