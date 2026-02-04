@@ -22,23 +22,25 @@ func NewServer(hub *ws.Hub, port int) *Server {
 	return &Server{hub: hub, port: port}
 }
 
-// Run starts the HTTP server (blocking).
+// Run starts the HTTP server (blocking). Used when monitoring runs on its own port.
 func (s *Server) Run() {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/api/stats", s.handleAPIStats)
-	mux.HandleFunc("/", s.handleDashboard)
+	mux.HandleFunc("/api/stats", s.HandleAPIStats)
+	mux.HandleFunc("/", s.HandleDashboard)
 	addr := ":" + strconv.Itoa(s.port)
 	fmt.Printf("[MONITORING] Dashboard available at http://localhost%s\n", addr)
 	_ = http.ListenAndServe(addr, mux)
 }
 
-func (s *Server) handleAPIStats(w http.ResponseWriter, r *http.Request) {
+// HandleAPIStats serves /api/stats JSON (exported for single-port mode).
+func (s *Server) HandleAPIStats(w http.ResponseWriter, r *http.Request) {
 	st := stats.GetServerStats(s.hub)
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(st)
 }
 
-func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
+// HandleDashboard serves / dashboard HTML (exported for single-port mode).
+func (s *Server) HandleDashboard(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
 		http.NotFound(w, r)
 		return
