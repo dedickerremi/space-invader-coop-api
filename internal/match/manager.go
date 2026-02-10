@@ -18,11 +18,19 @@ var (
 
 func createInitialState() types.GameState {
 	return types.GameState{
-		Players: nil,
-		Bullets: nil,
-		Started: false,
-		Paused:  false,
-		PausedBy: nil,
+		Players:           nil,
+		Bullets:           nil,
+		Enemies:           nil,
+		Lives:             0,
+		Points:            nil,
+		Kills:             nil,
+		WaveNumber:        0,
+		Started:           false,
+		Paused:            false,
+		PausedBy:          nil,
+		GameOver:          false,
+		GameOverSummary:   nil,
+		NextWaveCountdown: 0,
 	}
 }
 

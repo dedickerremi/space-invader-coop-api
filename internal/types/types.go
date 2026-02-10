@@ -17,13 +17,39 @@ type Bullet struct {
 	OwnerID string `json:"ownerId"`
 }
 
+// Enemy represents an enemy mob.
+type Enemy struct {
+	X int `json:"x"`
+	Y int `json:"y"`
+}
+
+// PlayerScore is one player's score in the game-over summary.
+type PlayerScore struct {
+	PlayerID string `json:"playerId"`
+	Points   int    `json:"points"`
+	Kills    int    `json:"kills"`
+}
+
+// GameOverSummary is sent when the game ends (no lives left).
+type GameOverSummary struct {
+	PlayerScores []PlayerScore `json:"playerScores"`
+}
+
 // GameState is the full game state for a match.
 type GameState struct {
-	Players []Player `json:"players"`
-	Bullets []Bullet `json:"bullets"`
-	Started bool     `json:"started"`
-	Paused  bool     `json:"paused"`
-	PausedBy *string `json:"pausedBy,omitempty"` // playerId who paused
+	Players           []Player          `json:"players"`
+	Bullets           []Bullet          `json:"bullets"`
+	Enemies           []Enemy           `json:"enemies"`
+	Lives             int               `json:"lives"`
+	Points            map[string]int    `json:"points"`  // playerId -> points
+	Kills             map[string]int    `json:"kills"`   // playerId -> kills
+	WaveNumber        int               `json:"waveNumber"`
+	Started           bool              `json:"started"`
+	Paused            bool              `json:"paused"`
+	PausedBy          *string           `json:"pausedBy,omitempty"`
+	GameOver          bool              `json:"gameOver"`
+	GameOverSummary   *GameOverSummary  `json:"gameOverSummary,omitempty"`
+	NextWaveCountdown int               `json:"nextWaveCountdown"` // ticks until next wave (internal, can expose for UI)
 }
 
 // Match holds match metadata and game state.
