@@ -1,0 +1,34 @@
+# Merge main into production — déclenche un déploiement Fly (branche production)
+name: Merge main → production
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  merge-to-production:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Merge main into production
+        run: |
+          git fetch origin
+          if git show-ref --verify --quiet refs/remotes/origin/production; then
+            git checkout -B production origin/production
+            git merge origin/main -m "chore: merge main into production [automated]"
+          else
+            git checkout -B production origin/main
+          fi
+          git push origin production
