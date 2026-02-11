@@ -2,32 +2,67 @@ package game
 
 import (
 	"fmt"
-	"math"
 	"math/rand"
 
 	"space-invaders-coop/backend-go/internal/match"
 	"space-invaders-coop/backend-go/internal/types"
 )
 
+// currentLevel holds the loaded level definition. Initialized on first use.
+var currentLevel *LevelDefinition
+
+func getLevel() *LevelDefinition {
+	if currentLevel == nil {
+		level, err := LoadLevel("level1.json")
+		if err != nil {
+			fmt.Printf("[GAME] Warning: could not load level: %v, using fallback\n", err)
+			currentLevel = &LevelDefinition{
+				Waves: []WaveDefinition{
+					{Number: 1, Spawns: []SpawnEvent{
+						{TickOffset: 0, Kind: EnemyStatic, X: 200, Y: 20},
+						{TickOffset: 0, Kind: EnemyStatic, X: 400, Y: 20},
+						{TickOffset: 0, Kind: EnemyStatic, X: 600, Y: 20},
+					}},
+				},
+			}
+		} else {
+			currentLevel = level
+		}
+	}
+	return currentLevel
+}
+
 const (
-	playerSpeed        = 5
-	bulletSpeed        = 8
-	gameWidth          = 800
-	gameHeight         = 600
-	playerY            = 550
-	playerWidth        = 40
-	playerHeight       = 20
-	enemySize             = 24
-	enemySpeed            = 2
-	waveIntervalTicks     = 90   // start: ~3s between waves
-	minWaveIntervalTicks  = 35   // minimum: ~1.2s between waves (ramp stops here)
-	waveIntervalDecrease  = 4   // decrease interval by this many ticks per wave
-	minEnemiesPerWave     = 2
-	maxEnemiesPerWave     = 12  // cap so late game doesn't explode
-	enemiesPerWaveBonus   = 1   // +1 enemy per wave (wave 1: 2, wave 5: 6, etc.)
-	initialLives          = 3
+	playerSpeed  = 5
+	bulletSpeed  = 8
+	gameWidth    = 800
+	gameHeight   = 600
+	playerY      = 550
+	playerWidth  = 40
+	playerHeight = 20
+	enemySize    = 28
+	initialLives = 3
 	pointsPerKill         = 100
-	enemySpawnMargin      = 40
+	pointsPerKillPatrol   = 250
+
+	// Enemy movement
+	staticEnemySpeed = 1          // static enemies drift down slowly
+	patrolEnemySpeed = 1          // patrol enemies drift down
+	patrolHorizontalSpeed = 3     // patrol horizontal zigzag speed
+	patrolAmplitude       = 80    // max px from spawn X before reversing
+
+	// Enemy shooting
+	staticShootInterval  = 90     // ~3s between shots for static
+	patrolShootInterval  = 120    // ~4s between shots for patrol
+	enemyBulletSpeed     = 4.0    // enemy bullet speed (downward)
+	enemyBulletDiagSpeed = 2.5    // diagonal X component for patrol shots
+
+	// Wave timing
+	waveCooldownTicks = 60        // ~2s pause between waves
+
+	// Player respawn
+	respawnTicks    = 150          // 5s at 30Hz
+	invincibleTicks = 60           // 2s invincibility after respawn
 )
 
 // GetState returns a deep copy of the game state for a match, or nil.
@@ -47,6 +82,8 @@ func deepCopyState(s *types.GameState) *types.GameState {
 	copy(players, s.Players)
 	bullets := make([]types.Bullet, len(s.Bullets))
 	copy(bullets, s.Bullets)
+	enemyBullets := make([]types.EnemyBullet, len(s.EnemyBullets))
+	copy(enemyBullets, s.EnemyBullets)
 	enemies := make([]types.Enemy, len(s.Enemies))
 	copy(enemies, s.Enemies)
 	points := make(map[string]int)
@@ -71,6 +108,7 @@ func deepCopyState(s *types.GameState) *types.GameState {
 	return &types.GameState{
 		Players:           players,
 		Bullets:           bullets,
+		EnemyBullets:      enemyBullets,
 		Enemies:           enemies,
 		Lives:             s.Lives,
 		Points:            points,
@@ -86,6 +124,7 @@ func deepCopyState(s *types.GameState) *types.GameState {
 }
 
 // AddPlayer adds a player to the match and returns the player, or nil.
+// If the player is already in the match, returns the existing player (idempotent).
 func AddPlayer(matchID, playerID string) *types.Player {
 	m := match.GetMatch(matchID)
 	if m == nil {
@@ -93,6 +132,14 @@ func AddPlayer(matchID, playerID string) *types.Player {
 	}
 	m.Mu.Lock()
 	defer m.Mu.Unlock()
+
+	// Check if player is already in the match (e.g. reconnect / StrictMode remount)
+	for i := range m.State.Players {
+		if m.State.Players[i].ID == playerID {
+			return &m.State.Players[i]
+		}
+	}
+
 	x := 200
 	if len(m.State.Players) > 0 {
 		x = 600
@@ -102,18 +149,28 @@ func AddPlayer(matchID, playerID string) *types.Player {
 		X:         x,
 		Alive:     true,
 		Direction: 0,
+		Lives:     initialLives,
 	}
 	m.State.Players = append(m.State.Players, p)
 	if len(m.State.Players) == 2 {
 		m.State.Started = true
-		m.State.Lives = initialLives
+		// Compute total lives for backward compat
+		m.State.Lives = 0
+		for _, pl := range m.State.Players {
+			m.State.Lives += pl.Lives
+		}
 		m.State.Points = make(map[string]int)
 		m.State.Kills = make(map[string]int)
 		for _, pl := range m.State.Players {
 			m.State.Points[pl.ID] = 0
 			m.State.Kills[pl.ID] = 0
 		}
-		m.State.NextWaveCountdown = waveIntervalTicks
+		// Start wave 1
+		m.State.WaveNumber = 1
+		m.State.WaveTick = 0
+		m.State.WaveCleared = false
+		m.State.WaveCooldown = 0
+		m.State.NextWaveCountdown = 0
 	}
 	return &p
 }
@@ -239,134 +296,391 @@ func Tick(matchID string) {
 	}
 	m.Mu.Lock()
 	defer m.Mu.Unlock()
-	if !m.State.Started || m.State.Paused || m.State.GameOver {
+	s := &m.State
+	if !s.Started || s.Paused || s.GameOver {
 		return
 	}
 
-	// Wave spawn (incremental: more enemies + shorter interval each wave)
-	m.State.NextWaveCountdown--
-	if m.State.NextWaveCountdown <= 0 {
-		m.State.WaveNumber++
-		// Next wave comes sooner each time, down to a minimum
-		nextInterval := waveIntervalTicks - (m.State.WaveNumber-1)*waveIntervalDecrease
-		if nextInterval < minWaveIntervalTicks {
-			nextInterval = minWaveIntervalTicks
-		}
-		m.State.NextWaveCountdown = nextInterval
-		// More enemies per wave as game progresses (capped)
-		baseEnemies := minEnemiesPerWave + (m.State.WaveNumber-1)*enemiesPerWaveBonus
-		if baseEnemies > maxEnemiesPerWave {
-			baseEnemies = maxEnemiesPerWave
-		}
-		n := baseEnemies + rand.Intn(2) // small random +0 or +1
-		if n > maxEnemiesPerWave {
-			n = maxEnemiesPerWave
-		}
-		for i := 0; i < n; i++ {
-			x := enemySpawnMargin + rand.Intn(gameWidth-2*enemySpawnMargin)
-			m.State.Enemies = append(m.State.Enemies, types.Enemy{X: x, Y: 20})
-		}
-	}
+	level := getLevel()
 
-	// Player movement
-	for i := range m.State.Players {
-		if !m.State.Players[i].Alive {
+	// --- Wave management ---
+	tickWaveSpawning(s, level)
+
+	// --- Player respawn timers + invincibility ---
+	tickPlayerRespawn(s)
+
+	// --- Player movement ---
+	for i := range s.Players {
+		if !s.Players[i].Alive {
 			continue
 		}
-		m.State.Players[i].X += m.State.Players[i].Direction * playerSpeed
-		m.State.Players[i].X = int(math.Max(20, math.Min(float64(gameWidth-20), float64(m.State.Players[i].X))))
+		s.Players[i].X += s.Players[i].Direction * playerSpeed
+		s.Players[i].X = clamp(s.Players[i].X, 20, gameWidth-20)
 	}
 
-	// Bullet–enemy collision (bullet hits enemy -> remove both, add points/kill to owner)
-	type pair struct{ bi, ei int }
-	var toRemove []pair
-	for bi, b := range m.State.Bullets {
-		for ei, e := range m.State.Enemies {
-			if bulletHitEnemy(b.X, b.Y, e.X, e.Y) {
-				toRemove = append(toRemove, pair{bi, ei})
-				if m.State.Points != nil {
-					m.State.Points[b.OwnerID] += pointsPerKill
-					m.State.Kills[b.OwnerID]++
-				}
-				goto nextBullet
+	// --- Enemy AI (movement + shooting) ---
+	tickEnemyAI(s)
+
+	// --- Move player bullets + check collisions ---
+	tickPlayerBullets(s)
+
+	// --- Move enemy bullets + check collisions ---
+	tickEnemyBullets(s)
+
+	// --- Enemy-player collision ---
+	tickEnemyPlayerCollision(s)
+
+	// --- Recompute total lives (for HUD backward compat) ---
+	totalLives := 0
+	for _, p := range s.Players {
+		totalLives += p.Lives
+	}
+	s.Lives = totalLives
+
+	// --- Game over check: all players permanently dead ---
+	allDead := true
+	for _, p := range s.Players {
+		if p.Lives > 0 || p.Alive {
+			allDead = false
+			break
+		}
+	}
+	if allDead {
+		s.GameOver = true
+		scores := make([]types.PlayerScore, 0, len(s.Players))
+		for _, p := range s.Players {
+			pts, k := 0, 0
+			if s.Points != nil {
+				pts = s.Points[p.ID]
+			}
+			if s.Kills != nil {
+				k = s.Kills[p.ID]
+			}
+			scores = append(scores, types.PlayerScore{PlayerID: p.ID, Points: pts, Kills: k})
+		}
+		s.GameOverSummary = &types.GameOverSummary{PlayerScores: scores}
+	}
+}
+
+// --- Wave spawning ---
+
+func tickWaveSpawning(s *types.GameState, level *LevelDefinition) {
+	// If in cooldown between waves
+	if s.WaveCooldown > 0 {
+		s.WaveCooldown--
+		s.NextWaveCountdown = s.WaveCooldown
+		if s.WaveCooldown <= 0 {
+			// Start next wave
+			s.WaveNumber++
+			s.WaveTick = 0
+			s.WaveCleared = false
+		}
+		return
+	}
+
+	// Current wave index (loops through level waves)
+	if len(level.Waves) == 0 {
+		return
+	}
+	waveIdx := (s.WaveNumber - 1) % len(level.Waves)
+	wave := &level.Waves[waveIdx]
+
+	// Spawn enemies whose tick offset has been reached
+	for _, spawn := range wave.Spawns {
+		if spawn.TickOffset == s.WaveTick {
+			enemy := types.Enemy{
+				X:          spawn.X,
+				Y:          spawn.Y,
+				Type:       string(spawn.Kind),
+				SpawnX:     spawn.X,
+				PatternDir: 1,
+				ShootTimer: randomShootDelay(spawn.Kind),
+			}
+			s.Enemies = append(s.Enemies, enemy)
+		}
+	}
+
+	s.WaveTick++
+
+	// Check if all spawns have been triggered and all enemies are gone
+	allSpawned := true
+	for _, spawn := range wave.Spawns {
+		if spawn.TickOffset >= s.WaveTick {
+			allSpawned = false
+			break
+		}
+	}
+
+	if allSpawned && len(s.Enemies) == 0 {
+		// Wave cleared — start cooldown for next wave
+		s.WaveCleared = true
+		s.WaveCooldown = waveCooldownTicks
+		s.NextWaveCountdown = waveCooldownTicks
+	}
+}
+
+func randomShootDelay(kind EnemyKind) int {
+	base := staticShootInterval
+	if kind == EnemyPatrol {
+		base = patrolShootInterval
+	}
+	// Randomize ±30% so enemies don't all fire in sync
+	variance := base * 30 / 100
+	if variance == 0 {
+		return base
+	}
+	return base - variance + rand.Intn(2*variance)
+}
+
+// --- Enemy AI ---
+
+func tickEnemyAI(s *types.GameState) {
+	for i := range s.Enemies {
+		e := &s.Enemies[i]
+
+		switch e.Type {
+		case "static":
+			// Static: drift down slowly
+			e.Y += staticEnemySpeed
+
+			// Shoot straight down
+			e.ShootTimer--
+			if e.ShootTimer <= 0 {
+				e.ShootTimer = randomShootDelay(EnemyStatic)
+				s.EnemyBullets = append(s.EnemyBullets, types.EnemyBullet{
+					X: float64(e.X), Y: float64(e.Y + enemySize/2),
+					DX: 0, DY: enemyBulletSpeed,
+				})
+			}
+
+		case "patrol":
+			// Patrol: zigzag horizontally + drift down
+			e.X += e.PatternDir * patrolHorizontalSpeed
+			e.Y += patrolEnemySpeed
+
+			// Reverse at amplitude bounds
+			if e.X > e.SpawnX+patrolAmplitude || e.X >= gameWidth-20 {
+				e.PatternDir = -1
+			} else if e.X < e.SpawnX-patrolAmplitude || e.X <= 20 {
+				e.PatternDir = 1
+			}
+
+			// Shoot 3 bullets: straight + 2 diagonals
+			e.ShootTimer--
+			if e.ShootTimer <= 0 {
+				e.ShootTimer = randomShootDelay(EnemyPatrol)
+				baseY := float64(e.Y + enemySize/2)
+				baseX := float64(e.X)
+				// Straight down
+				s.EnemyBullets = append(s.EnemyBullets, types.EnemyBullet{
+					X: baseX, Y: baseY, DX: 0, DY: enemyBulletSpeed,
+				})
+				// Diagonal left
+				s.EnemyBullets = append(s.EnemyBullets, types.EnemyBullet{
+					X: baseX, Y: baseY, DX: -enemyBulletDiagSpeed, DY: enemyBulletSpeed,
+				})
+				// Diagonal right
+				s.EnemyBullets = append(s.EnemyBullets, types.EnemyBullet{
+					X: baseX, Y: baseY, DX: enemyBulletDiagSpeed, DY: enemyBulletSpeed,
+				})
 			}
 		}
-	nextBullet:
 	}
-	// Remove hit bullets and enemies (reverse order to preserve indices)
-	hitEnemies := make(map[int]bool)
-	for _, p := range toRemove {
-		hitEnemies[p.ei] = true
-	}
-	var newBullets []types.Bullet
-	for bi, b := range m.State.Bullets {
-		removed := false
-		for _, p := range toRemove {
-			if p.bi == bi {
-				removed = true
+}
+
+// --- Player bullets vs enemies ---
+
+func tickPlayerBullets(s *types.GameState) {
+	type hit struct{ bi, ei int }
+	var hits []hit
+
+	for bi, b := range s.Bullets {
+		for ei, e := range s.Enemies {
+			if bulletHitEnemy(b.X, b.Y, e.X, e.Y) {
+				pts := pointsPerKill
+				if e.Type == "patrol" {
+					pts = pointsPerKillPatrol
+				}
+				if s.Points != nil {
+					s.Points[b.OwnerID] += pts
+					s.Kills[b.OwnerID]++
+				}
+				hits = append(hits, hit{bi, ei})
 				break
 			}
 		}
-		if !removed {
-			b.Y -= bulletSpeed
-			if b.Y > 0 {
-				newBullets = append(newBullets, b)
-			}
+	}
+
+	hitBullets := make(map[int]bool)
+	hitEnemies := make(map[int]bool)
+	for _, h := range hits {
+		hitBullets[h.bi] = true
+		hitEnemies[h.ei] = true
+	}
+
+	// Update bullets
+	var newBullets []types.Bullet
+	for bi, b := range s.Bullets {
+		if hitBullets[bi] {
+			continue
+		}
+		b.Y -= bulletSpeed
+		if b.Y > 0 {
+			newBullets = append(newBullets, b)
 		}
 	}
-	m.State.Bullets = newBullets
+	s.Bullets = newBullets
+
+	// Update enemies (remove hit + off-screen)
 	var newEnemies []types.Enemy
-	for ei, e := range m.State.Enemies {
+	for ei, e := range s.Enemies {
 		if hitEnemies[ei] {
 			continue
 		}
-		e.Y += enemySpeed
-		if e.Y < gameHeight {
-			newEnemies = append(newEnemies, e)
-		} else {
-			// Enemy reached bottom -> lose a life
-			m.State.Lives--
+		if e.Y >= gameHeight {
+			// Enemy escaped: damage a random alive player
+			damageRandomPlayer(s)
+			continue
 		}
+		newEnemies = append(newEnemies, e)
 	}
-	m.State.Enemies = newEnemies
+	s.Enemies = newEnemies
+}
 
-	// Enemy–player collision
-	var finalEnemies []types.Enemy
-	for _, e := range m.State.Enemies {
+// --- Enemy bullets vs players ---
+
+func tickEnemyBullets(s *types.GameState) {
+	var remaining []types.EnemyBullet
+
+	for _, eb := range s.EnemyBullets {
+		eb.X += eb.DX
+		eb.Y += eb.DY
+
+		// Off-screen?
+		if eb.Y > float64(gameHeight) || eb.X < 0 || eb.X > float64(gameWidth) {
+			continue
+		}
+
+		// Check collision with alive, non-invincible players
 		hitPlayer := false
-		for pi := range m.State.Players {
-			if !m.State.Players[pi].Alive {
+		for pi := range s.Players {
+			if !s.Players[pi].Alive || s.Players[pi].InvincibleTimer > 0 {
 				continue
 			}
-			if enemyHitPlayer(e.X, e.Y, m.State.Players[pi].X, playerY) {
+			px := s.Players[pi].X
+			if enemyBulletHitPlayer(eb.X, eb.Y, float64(px), float64(playerY)) {
 				hitPlayer = true
-				m.State.Lives--
+				killPlayer(&s.Players[pi])
+				break
+			}
+		}
+
+		if !hitPlayer {
+			remaining = append(remaining, eb)
+		}
+	}
+
+	s.EnemyBullets = remaining
+}
+
+func enemyBulletHitPlayer(bx, by, px, py float64) bool {
+	pw2 := float64(playerWidth) / 2
+	ph2 := float64(playerHeight) / 2
+	return bx >= px-pw2 && bx <= px+pw2 && by >= py-ph2 && by <= py+ph2
+}
+
+// --- Enemy-player body collision ---
+
+func tickEnemyPlayerCollision(s *types.GameState) {
+	var remaining []types.Enemy
+	for _, e := range s.Enemies {
+		hitPlayer := false
+		for pi := range s.Players {
+			if !s.Players[pi].Alive || s.Players[pi].InvincibleTimer > 0 {
+				continue
+			}
+			if enemyHitPlayer(e.X, e.Y, s.Players[pi].X, playerY) {
+				hitPlayer = true
+				killPlayer(&s.Players[pi])
 				break
 			}
 		}
 		if !hitPlayer {
-			finalEnemies = append(finalEnemies, e)
+			remaining = append(remaining, e)
 		}
 	}
-	m.State.Enemies = finalEnemies
+	s.Enemies = remaining
+}
 
-	// Game over
-	if m.State.Lives <= 0 {
-		m.State.GameOver = true
-		scores := make([]types.PlayerScore, 0, len(m.State.Players))
-		for _, p := range m.State.Players {
-			pts := 0
-			k := 0
-			if m.State.Points != nil {
-				pts = m.State.Points[p.ID]
-			}
-			if m.State.Kills != nil {
-				k = m.State.Kills[p.ID]
-			}
-			scores = append(scores, types.PlayerScore{PlayerID: p.ID, Points: pts, Kills: k})
-		}
-		m.State.GameOverSummary = &types.GameOverSummary{PlayerScores: scores}
+// --- Player damage & respawn ---
+
+// killPlayer handles a player taking a hit: lose a life, mark dead, start respawn timer.
+func killPlayer(p *types.Player) {
+	p.Lives--
+	p.Alive = false
+	p.Direction = 0
+	if p.Lives > 0 {
+		p.RespawnTimer = respawnTicks
+	} else {
+		p.RespawnTimer = 0 // permanently dead
 	}
+	p.InvincibleTimer = 0
+}
+
+// damageRandomPlayer picks a random alive player and kills them.
+func damageRandomPlayer(s *types.GameState) {
+	var alive []*types.Player
+	for i := range s.Players {
+		if s.Players[i].Alive && s.Players[i].InvincibleTimer <= 0 {
+			alive = append(alive, &s.Players[i])
+		}
+	}
+	if len(alive) == 0 {
+		return
+	}
+	target := alive[rand.Intn(len(alive))]
+	killPlayer(target)
+}
+
+// tickPlayerRespawn decrements respawn and invincibility timers, and revives players.
+func tickPlayerRespawn(s *types.GameState) {
+	for i := range s.Players {
+		p := &s.Players[i]
+
+		// Tick invincibility
+		if p.InvincibleTimer > 0 {
+			p.InvincibleTimer--
+		}
+
+		// Tick respawn
+		if !p.Alive && p.RespawnTimer > 0 {
+			p.RespawnTimer--
+			if p.RespawnTimer <= 0 {
+				// Respawn!
+				p.Alive = true
+				p.InvincibleTimer = invincibleTicks
+				// Respawn at starting position
+				if i == 0 {
+					p.X = 200
+				} else {
+					p.X = 600
+				}
+				p.Direction = 0
+			}
+		}
+	}
+}
+
+// --- Helpers ---
+
+func clamp(v, min, max int) int {
+	if v < min {
+		return min
+	}
+	if v > max {
+		return max
+	}
+	return v
 }
 
 func bulletHitEnemy(bx, by, ex, ey int) bool {

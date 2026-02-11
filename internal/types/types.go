@@ -4,23 +4,40 @@ import "sync"
 
 // Player represents a player in the game.
 type Player struct {
-	ID        string `json:"id"`
-	X         int    `json:"x"`
-	Alive     bool   `json:"alive"`
-	Direction int    `json:"direction"` // -1 left, 0 stopped, 1 right
+	ID              string `json:"id"`
+	X               int    `json:"x"`
+	Alive           bool   `json:"alive"`
+	Direction       int    `json:"direction"`       // -1 left, 0 stopped, 1 right
+	Lives           int    `json:"lives"`            // individual lives
+	RespawnTimer    int    `json:"respawnTimer"`     // ticks until respawn (0 = not respawning)
+	InvincibleTimer int    `json:"invincibleTimer"`  // ticks of invincibility after respawn (0 = vulnerable)
 }
 
-// Bullet represents a bullet in the game.
+// Bullet represents a player bullet in the game.
 type Bullet struct {
 	X       int    `json:"x"`
 	Y       int    `json:"y"`
 	OwnerID string `json:"ownerId"`
 }
 
+// EnemyBullet represents a bullet fired by an enemy.
+type EnemyBullet struct {
+	X  float64 `json:"x"`
+	Y  float64 `json:"y"`
+	DX float64 `json:"dx"` // velocity X per tick
+	DY float64 `json:"dy"` // velocity Y per tick
+}
+
 // Enemy represents an enemy mob.
 type Enemy struct {
-	X int `json:"x"`
-	Y int `json:"y"`
+	X    int    `json:"x"`
+	Y    int    `json:"y"`
+	Type string `json:"type"` // "static" or "patrol"
+
+	// Internal fields (not sent to client via JSON tags with -)
+	SpawnX     int `json:"-"` // original X for patrol pattern
+	PatternDir int `json:"-"` // current horizontal direction for patrol: -1 or 1
+	ShootTimer int `json:"-"` // ticks until next shot
 }
 
 // PlayerScore is one player's score in the game-over summary.
@@ -39,6 +56,7 @@ type GameOverSummary struct {
 type GameState struct {
 	Players           []Player          `json:"players"`
 	Bullets           []Bullet          `json:"bullets"`
+	EnemyBullets      []EnemyBullet     `json:"enemyBullets"`
 	Enemies           []Enemy           `json:"enemies"`
 	Lives             int               `json:"lives"`
 	Points            map[string]int    `json:"points"`  // playerId -> points
@@ -49,7 +67,12 @@ type GameState struct {
 	PausedBy          *string           `json:"pausedBy,omitempty"`
 	GameOver          bool              `json:"gameOver"`
 	GameOverSummary   *GameOverSummary  `json:"gameOverSummary,omitempty"`
-	NextWaveCountdown int               `json:"nextWaveCountdown"` // ticks until next wave (internal, can expose for UI)
+	NextWaveCountdown int               `json:"nextWaveCountdown"`
+
+	// Internal wave tracking (not sent to client)
+	WaveTick      int `json:"-"` // ticks since current wave started
+	WaveCleared   bool `json:"-"` // all enemies from current wave are dead/gone
+	WaveCooldown  int `json:"-"` // ticks to wait before starting next wave
 }
 
 // Match holds match metadata and game state.
@@ -67,8 +90,15 @@ type Match struct {
 
 // ClientMessage is a union of all client message types.
 type ClientMessage struct {
-	Type string `json:"type"`
-	Dir  *int   `json:"dir,omitempty"` // for MOVE: -1 or 1
+	Type      string   `json:"type"`
+	Dir       *int     `json:"dir,omitempty"`       // for MOVE: -1 or 1
+	Timestamp *float64 `json:"timestamp,omitempty"` // for PING: client timestamp in ms
+}
+
+// PongMessage is the server response to a client PING.
+type PongMessage struct {
+	Type      string  `json:"type"`
+	Timestamp float64 `json:"timestamp"` // echo back the client timestamp
 }
 
 // --- Server messages (outputs) ---

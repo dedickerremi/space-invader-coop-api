@@ -1,0 +1,92 @@
+{
+  "waves": [
+    {
+      "name": "Introduction",
+      "rowDelay": 30,
+      "rows": [
+        "..S...S...S..",
+        ".............",
+        "............."
+      ]
+    },
+    {
+      "name": "Formation",
+      "rowDelay": 30,
+      "rows": [
+        ".S.S.S.S.S.S.",
+        ".............",
+        "..S.S.S.S.S.."
+      ]
+    },
+    {
+      "name": "First Patrol",
+      "rowDelay": 30,
+      "rows": [
+        "S.S.S.S.S.S.S",
+        "..............",
+        "....P...P.....",
+        "..............",
+        ".S.S.S.S.S.S."
+      ]
+    },
+    {
+      "name": "The Wall",
+      "rowDelay": 25,
+      "rows": [
+        "SSSSSSSSSSSSS",
+        "..............",
+        "..P...P...P..",
+        "..............",
+        ".S.S.S.S.S.S."
+      ]
+    },
+    {
+      "name": "Flankers",
+      "rowDelay": 25,
+      "rows": [
+        ".P.........P.",
+        "..S.S.S.S.S..",
+        "..............",
+        "SSSSSSSSSSSSS",
+        "..............",
+        "..P...P...P.."
+      ]
+    },
+    {
+      "name": "Swarm",
+      "rowDelay": 20,
+      "rows": [
+        "P.P.P.P.P.P.P",
+        "..............",
+        ".S.S.S.S.S.S.",
+        "SSSSSSSSSSSSS",
+        "..............",
+        "..P.P.P.P.P.."
+      ]
+    },
+    {
+      "name": "Double Wall",
+      "rowDelay": 20,
+      "rows": [
+        "SSSSSSSSSSSSS",
+        ".P.P.P.P.P.P.",
+        "..............",
+        "SSSSSSSSSSSSS",
+        ".P.P.P.P.P.P."
+      ]
+    },
+    {
+      "name": "Onslaught",
+      "rowDelay": 15,
+      "rows": [
+        "P.P.P.P.P.P.P",
+        "SSSSSSSSSSSSS",
+        "..............",
+        "P.P.P.P.P.P.P",
+        "SSSSSSSSSSSSS",
+        "..............",
+        ".P.P.P.P.P.P."
+      ]
+    }
+  ]
+}

@@ -19,6 +19,10 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
+// Grace period before ending a match when a player disconnects.
+// This allows React StrictMode re-mounts to reconnect without killing the match.
+const disconnectGracePeriod = 800 * time.Millisecond
+
 // Server is the WebSocket server.
 type Server struct {
 	Hub *Hub
@@ -69,29 +73,59 @@ func (s *Server) HandleConnection(w http.ResponseWriter, r *http.Request) {
 	game.AddPlayer(matchID, playerID)
 	fmt.Printf("[WS] Player %s connected to %s (%d/2)\n", playerID, matchID, game.GetPlayerCount(matchID))
 
-	s.Hub.Send(conn, types.WelcomeMessage{Type: "WELCOME", PlayerID: playerID, MatchID: matchID})
+	// Use SendSafe so the WELCOME write doesn't race with game loop broadcasts
+	s.Hub.SendSafe(matchID, playerID, types.WelcomeMessage{Type: "WELCOME", PlayerID: playerID, MatchID: matchID})
 
 	// Read loop
 	for {
 		_, raw, err := conn.ReadMessage()
 		if err != nil {
+			fmt.Printf("[WS] Read error for %s in %s: %v\n", playerID, matchID, err)
 			break
 		}
 		result := HandleMessage(matchID, playerID, raw)
-		if result.Action == "exit" {
+		switch result.Action {
+		case "exit":
 			s.Hub.BroadcastToMatch(matchID, types.MatchEndedMessage{Type: "MATCH_ENDED", Reason: "Player left the game"})
 			s.Hub.CloseMatch(matchID)
-			break
+			goto done
+		case "pong":
+			// Respond to PING immediately with PONG (echo timestamp)
+			s.Hub.SendSafe(matchID, playerID, types.PongMessage{Type: "PONG", Timestamp: result.Timestamp})
 		}
 	}
+done:
 
-	// On disconnect
-	s.Hub.Unregister(matchID, playerID)
-	remaining := s.Hub.GetConnectedCount(matchID)
+	// On disconnect — only clean up if this connection is still the active one.
+	remaining := s.Hub.Unregister(matchID, playerID, conn)
+	if remaining == -1 {
+		// Stale goroutine: a newer connection has already replaced this one. Skip cleanup.
+		fmt.Printf("[WS] Stale connection for %s in %s — skipping cleanup\n", playerID, matchID)
+		return
+	}
+
 	if remaining > 0 {
+		// Another player is still connected. Wait a grace period before ending the match,
+		// in case this player reconnects (React StrictMode double-mount).
+		fmt.Printf("[WS] Player %s left %s, waiting %.0fms grace period (remaining=%d)\n",
+			playerID, matchID, disconnectGracePeriod.Seconds()*1000, remaining)
+		time.Sleep(disconnectGracePeriod)
+
+		// After grace period, check if the player has reconnected
+		if s.Hub.HasPlayer(matchID, playerID) {
+			fmt.Printf("[WS] Player %s reconnected to %s during grace period — cancel cleanup\n", playerID, matchID)
+			// Player reconnected, no need to end the match.
+			// But we still need to remove the player from game state if they were re-added
+			// (AddPlayer is idempotent, so the player was never removed from game state)
+			return
+		}
+
+		// Player did not reconnect — end the match for the remaining player
+		fmt.Printf("[WS] Grace period expired for %s in %s — ending match\n", playerID, matchID)
 		s.Hub.BroadcastToMatch(matchID, types.MatchEndedMessage{Type: "MATCH_ENDED", Reason: "Opponent disconnected"})
 		s.Hub.CloseMatch(matchID)
 	}
+
 	game.RemovePlayer(matchID, playerID)
 	fmt.Printf("[WS] Player %s disconnected from %s (%d/2)\n", playerID, matchID, game.GetPlayerCount(matchID))
 	if game.GetPlayerCount(matchID) == 0 {

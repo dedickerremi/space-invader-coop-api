@@ -10,7 +10,8 @@ import (
 
 // HandleResult is the result of handling a message.
 type HandleResult struct {
-	Action string // "none" or "exit"
+	Action    string  // "none", "exit", or "pong"
+	Timestamp float64 // for "pong": echoed client timestamp
 }
 
 // HandleMessage parses and handles a client message. Returns action "exit" if client requested exit.
@@ -41,6 +42,8 @@ func HandleMessage(matchID, playerID string, raw []byte) HandleResult {
 		game.ResumeGame(matchID, playerID)
 	case "EXIT":
 		return HandleResult{Action: "exit"}
+	case "PING":
+		return HandleResult{Action: "pong", Timestamp: *msg.Timestamp}
 	}
 	return HandleResult{Action: "none"}
 }
@@ -54,6 +57,8 @@ func isValidMessage(msg *types.ClientMessage) bool {
 		return msg.Dir != nil && (*msg.Dir == -1 || *msg.Dir == 1)
 	case "STOP", "SHOOT", "PAUSE", "RESUME", "EXIT":
 		return true
+	case "PING":
+		return msg.Timestamp != nil
 	default:
 		return false
 	}
