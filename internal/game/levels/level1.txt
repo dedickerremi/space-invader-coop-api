@@ -1,0 +1,67 @@
+# Level 1 — Space Invaders Coop
+#
+# Grid format:
+#   S = Static enemy  (doesn't move, shoots straight down slowly)
+#   P = Patrol enemy   (moves in pattern, shoots 3 bullets: 2 diagonal + 1 straight)
+#   . = Empty
+
+#
+# Each column maps to an X position across the game width (800px).
+# Rows within a wave spawn top-to-bottom with a delay between each row.
+# Waves trigger one after the other once all enemies from the current wave are dead.
+
+=== WAVE 1 ===
+.............
+..S...S...S..
+.............
+
+=== WAVE 2 ===
+.S.S.S.S.S.S.
+..............
+..S.S.S.S.S..
+
+=== WAVE 3 ===
+S.S.S.S.S.S.S
+..............
+....P...P.....
+..............
+.S.S.S.S.S.S.
+
+=== WAVE 4 ===
+SSSSSSSSSSSSS
+..............
+..P...P...P..
+..............
+.S.S.S.S.S.S.
+
+=== WAVE 5 ===
+.P.........P.
+..S.S.S.S.S..
+..............
+SSSSSSSSSSSSS
+..............
+..P...P...P..
+
+=== WAVE 6 ===
+P.P.P.P.P.P.P
+..............
+.S.S.S.S.S.S.
+SSSSSSSSSSSSS
+..............
+..P.P.P.P.P..
+
+=== WAVE 7 ===
+SSSSSSSSSSSSS
+.P.P.P.P.P.P.
+..............
+SSSSSSSSSSSSS
+.P.P.P.P.P.P.
+
+=== WAVE 8 ===
+P.P.P.P.P.P.P
+SSSSSSSSSSSSS
+..............
+P.P.P.P.P.P.P
+SSSSSSSSSSSSS
+..............
+.P.P.P.P.P.P.
