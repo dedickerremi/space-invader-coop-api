@@ -82,6 +82,8 @@ func main() {
 		mux.HandleFunc("/api/levels/", monitoring.BasicAuth(monitoring.HandleLevelByName))
 		mux.HandleFunc("/api/levels/reload", monitoring.BasicAuth(monitoring.HandleLevelsReload))
 		mux.HandleFunc("/editor", monitoring.BasicAuth(mon.HandleEditor))
+		mux.HandleFunc("/users", monitoring.BasicAuth(mon.HandleUsersList))
+		mux.HandleFunc("/users/", monitoring.BasicAuth(mon.HandleUserDetail))
 		mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 			if r.URL.Path != "/" {
 				http.NotFound(w, r)
