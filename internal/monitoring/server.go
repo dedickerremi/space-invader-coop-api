@@ -1,6 +1,7 @@
 package monitoring
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"html"
@@ -10,6 +11,26 @@ import (
 	"space-invaders-coop/backend-go/internal/stats"
 	"space-invaders-coop/backend-go/internal/ws"
 )
+
+const (
+	authUser = "admin"
+	authPass = "sp@c31nv@d3r"
+)
+
+// BasicAuth wraps a handler with HTTP Basic authentication.
+func BasicAuth(h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		user, pass, ok := r.BasicAuth()
+		userOK := subtle.ConstantTimeCompare([]byte(user), []byte(authUser)) == 1
+		passOK := subtle.ConstantTimeCompare([]byte(pass), []byte(authPass)) == 1
+		if !ok || !userOK || !passOK {
+			w.Header().Set("WWW-Authenticate", `Basic realm="Space Invaders Dashboard"`)
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+		h(w, r)
+	}
+}
 
 // Server is the HTTP monitoring server.
 type Server struct {
@@ -25,8 +46,12 @@ func NewServer(hub *ws.Hub, port int) *Server {
 // Run starts the HTTP server (blocking). Used when monitoring runs on its own port.
 func (s *Server) Run() {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/api/stats", s.HandleAPIStats)
-	mux.HandleFunc("/", s.HandleDashboard)
+	mux.HandleFunc("/api/stats", BasicAuth(s.HandleAPIStats))
+	mux.HandleFunc("/api/levels", BasicAuth(HandleLevelsList))
+	mux.HandleFunc("/api/levels/", BasicAuth(HandleLevelByName))
+	mux.HandleFunc("/api/levels/reload", BasicAuth(HandleLevelsReload))
+	mux.HandleFunc("/editor", BasicAuth(s.HandleEditor))
+	mux.HandleFunc("/", BasicAuth(s.HandleDashboard))
 	addr := ":" + strconv.Itoa(s.port)
 	fmt.Printf("[MONITORING] Dashboard available at http://localhost%s\n", addr)
 	_ = http.ListenAndServe(addr, mux)
@@ -118,6 +143,7 @@ func dashboardHTML(st stats.ServerStats) string {
 <body>
   <div class="container">
     <h1>Space Invaders Coop - Server Status</h1>
+    <p style="margin-bottom:1.5rem"><a href="/editor" style="color:#00aaff">&rarr; Open Level Editor</a></p>
     <div class="stats-grid">
       <div class="stat-card"><h2>Active Matches</h2><div class="value">` + strconv.Itoa(st.ActiveMatches) + ` / ` + strconv.Itoa(st.MaxMatches) + `</div></div>
       <div class="stat-card"><h2>Total Players</h2><div class="value">` + strconv.Itoa(st.TotalPlayers) + `</div></div>

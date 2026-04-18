@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -26,13 +27,48 @@ func main() {
 	wsServer := ws.NewServer(hub)
 	mon := monitoring.NewServer(hub, monitoringPort)
 
+	if err := game.SeedLevelsDir(); err != nil {
+		log.Printf("[LEVELS] seed warning: %v", err)
+	}
+
 	// Start game loop in background (broadcasts state via hub)
 	go game.StartLoop(hub)
+
+	handleGameMeta := func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		json.NewEncoder(w).Encode(map[string]int{
+			"gameWidth":         game.GameWidth,
+			"gameHeight":        game.GameHeight,
+			"playerXMin":        game.PlayerXMin,
+			"playerXMax":        game.PlayerXMax,
+			"playerYMin":        game.PlayerYMin,
+			"playerYMax":        game.PlayerYMax,
+			"playerY":           game.PlayerY,
+			"playerWidth":       game.PlayerWidth,
+			"playerHeight":      game.PlayerHeight,
+			"playerSpeed":       game.PlayerSpeed,
+			"bulletSpeed":       game.BulletSpeed,
+			"bulletWidth":       game.BulletWidth,
+			"bulletHeight":      game.BulletHeight,
+			"enemyBulletWidth":  game.EnemyBulletWidth,
+			"enemyBulletHeight": game.EnemyBulletHeight,
+			"enemySize":         game.EnemySize,
+			"patrolSize":        game.PatrolSize,
+			"powerUpSize":       game.PowerUpSize,
+			"initialLives":      game.InitialLives,
+		})
+	}
 
 	if port > 0 {
 		// Production: single PORT (Fly, Railway, Koyeb, etc.)
 		mux := http.NewServeMux()
-		mux.HandleFunc("/api/stats", mon.HandleAPIStats)
+		mux.HandleFunc("/api/game-meta", handleGameMeta)
+		mux.HandleFunc("/api/stats", monitoring.BasicAuth(mon.HandleAPIStats))
+		mux.HandleFunc("/api/levels", monitoring.BasicAuth(monitoring.HandleLevelsList))
+		mux.HandleFunc("/api/levels/", monitoring.BasicAuth(monitoring.HandleLevelByName))
+		mux.HandleFunc("/api/levels/reload", monitoring.BasicAuth(monitoring.HandleLevelsReload))
+		mux.HandleFunc("/editor", monitoring.BasicAuth(mon.HandleEditor))
 		mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 			if r.URL.Path != "/" {
 				http.NotFound(w, r)
@@ -42,7 +78,7 @@ func main() {
 				wsServer.HandleConnection(w, r)
 				return
 			}
-			mon.HandleDashboard(w, r)
+			monitoring.BasicAuth(mon.HandleDashboard)(w, r)
 		})
 		addr := ":" + strconv.Itoa(port)
 		fmt.Printf("[SERVER] Single port mode: WebSocket + monitoring on %s\n", addr)
@@ -53,6 +89,7 @@ func main() {
 	}
 
 	// Development: two servers (WS on WS_PORT, monitoring on MONITORING_PORT)
+	http.HandleFunc("/api/game-meta", handleGameMeta)
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		wsServer.HandleConnection(w, r)
 	})

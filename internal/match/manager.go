@@ -49,7 +49,11 @@ func GetActiveMatchCount() int {
 }
 
 // RegisterToken registers a token for a player in a match, creating the match if needed.
-func RegisterToken(token, matchID, playerID string) bool {
+// mode should be "solo" or "coop" (defaults to "coop" if empty).
+func RegisterToken(token, matchID, playerID, mode string) bool {
+	if mode == "" {
+		mode = "coop"
+	}
 	mu.Lock()
 	defer mu.Unlock()
 
@@ -64,13 +68,18 @@ func RegisterToken(token, matchID, playerID string) bool {
 			Tokens:    make(map[string]string),
 			State:     createInitialState(),
 			CreatedAt: time.Now().UnixMilli(),
+			Mode:      mode,
 		}
 		matches[matchID] = m
-		fmt.Printf("[MATCH] Created %s\n", matchID)
+		fmt.Printf("[MATCH] Created %s (mode=%s)\n", matchID, mode)
 	}
 
 	m := matches[matchID]
-	if len(m.PlayerIDs) >= 2 {
+	capacity := 2
+	if m.Mode == "solo" {
+		capacity = 1
+	}
+	if len(m.PlayerIDs) >= capacity {
 		found := false
 		for _, id := range m.PlayerIDs {
 			if id == playerID {
@@ -96,7 +105,7 @@ func RegisterToken(token, matchID, playerID string) bool {
 	}
 	m.Tokens[playerID] = token
 	tokenToPlayer[token] = struct{ MatchID, PlayerID string }{matchID, playerID}
-	fmt.Printf("[MATCH] Registered player %s in %s (%d/2)\n", playerID, matchID, len(m.PlayerIDs))
+	fmt.Printf("[MATCH] Registered player %s in %s (%d/%d)\n", playerID, matchID, len(m.PlayerIDs), capacity)
 	return true
 }
 

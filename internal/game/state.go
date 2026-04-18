@@ -12,38 +12,79 @@ import (
 var currentLevel *LevelDefinition
 
 func getLevel() *LevelDefinition {
-	if currentLevel == nil {
-		level, err := LoadLevel("level1.json")
-		if err != nil {
-			fmt.Printf("[GAME] Warning: could not load level: %v, using fallback\n", err)
-			currentLevel = &LevelDefinition{
-				Waves: []WaveDefinition{
-					{Number: 1, Spawns: []SpawnEvent{
-						{TickOffset: 0, Kind: EnemyStatic, X: 200, Y: 20},
-						{TickOffset: 0, Kind: EnemyStatic, X: 400, Y: 20},
-						{TickOffset: 0, Kind: EnemyStatic, X: 600, Y: 20},
-					}},
-				},
-			}
-		} else {
-			currentLevel = level
+	levelsMu.RLock()
+	cached := currentLevel
+	levelsMu.RUnlock()
+	if cached != nil {
+		return cached
+	}
+
+	level, err := LoadLevel(CurrentLevelName())
+	if err != nil {
+		fmt.Printf("[GAME] Warning: could not load level: %v, using fallback\n", err)
+		level = &LevelDefinition{
+			Waves: []WaveDefinition{
+				{Number: 1, Spawns: []SpawnEvent{
+					{TickOffset: 0, Kind: EnemyStatic, X: 200, Y: 20},
+					{TickOffset: 0, Kind: EnemyStatic, X: 400, Y: 20},
+					{TickOffset: 0, Kind: EnemyStatic, X: 600, Y: 20},
+				}},
+			},
 		}
 	}
-	return currentLevel
+	levelsMu.Lock()
+	currentLevel = level
+	levelsMu.Unlock()
+	return level
 }
 
+// Exported constants for the /api/game-meta endpoint.
+// Sizes used purely for client rendering (no backend collision impact) are
+// still defined here so the backend remains the single source of truth.
 const (
-	playerSpeed  = 5
-	bulletSpeed  = 8
-	gameWidth    = 800
-	gameHeight   = 600
-	playerY      = 550
-	playerWidth  = 40
-	playerHeight = 20
-	enemySize    = 28
-	initialLives = 3
+	PlayerSpeed  = 5
+	BulletSpeed  = 8
+	GameWidth    = 800
+	GameHeight   = 600
+	PlayerY      = 550
+	PlayerWidth  = 40
+	PlayerHeight = 20
+	PlayerXMin   = 20
+	PlayerXMax   = GameWidth - 20
+	PlayerYMin   = 350 // furthest the player can move forward (toward enemies)
+	PlayerYMax   = GameHeight - 20
+	EnemySize    = 28
+	PatrolSize   = EnemySize // backend uses one hitbox for static and patrol
+	InitialLives = 3
+
+	// Bullets are point-collision on the backend; these sizes are for client rendering.
+	BulletWidth      = 6
+	BulletHeight     = 14
+	EnemyBulletWidth = 6
+	EnemyBulletHeight = 10
+
+	// Power-up visual size (used for pickup hitbox AABB).
+	PowerUpSize = 20
+)
+
+const (
+	playerSpeed  = PlayerSpeed
+	bulletSpeed  = BulletSpeed
+	gameWidth    = GameWidth
+	gameHeight   = GameHeight
+	playerY      = PlayerY
+	playerXMin   = PlayerXMin
+	playerXMax   = PlayerXMax
+	playerYMin   = PlayerYMin
+	playerYMax   = PlayerYMax
+	playerWidth  = PlayerWidth
+	playerHeight = PlayerHeight
+	enemySize    = EnemySize
+	initialLives = InitialLives
 	pointsPerKill         = 100
 	pointsPerKillPatrol   = 250
+	pointsPerBulletShot   = 50
+	sparkLifeTicks        = 10 // ~333ms at 30 Hz
 
 	// Enemy movement
 	staticEnemySpeed = 1          // static enemies drift down slowly
@@ -63,7 +104,19 @@ const (
 	// Player respawn
 	respawnTicks    = 150          // 5s at 30Hz
 	invincibleTicks = 60           // 2s invincibility after respawn
+
+	// Power-ups
+	doubleShotDurationTicks = 300 // 10s at 30Hz
+	speedBoostDurationTicks = 300 // 10s
+	shieldDurationTicks     = 150 // 5s
+	pointsBonusValue        = 500
+	powerUpFallSpeed        = 2   // px per tick
+	powerUpDropStaticPct    = 10  // % chance on static kill
+	powerUpDropPatrolPct    = 20  // % chance on patrol kill
+	killStreakThreshold     = 5   // every N kills -> guaranteed drop
 )
+
+var powerUpKinds = []string{"extra_life", "double_shot", "speed_boost", "shield", "points_bonus"}
 
 // GetState returns a deep copy of the game state for a match, or nil.
 func GetState(matchID string) *types.GameState {
@@ -86,6 +139,10 @@ func deepCopyState(s *types.GameState) *types.GameState {
 	copy(enemyBullets, s.EnemyBullets)
 	enemies := make([]types.Enemy, len(s.Enemies))
 	copy(enemies, s.Enemies)
+	sparks := make([]types.Spark, len(s.Sparks))
+	copy(sparks, s.Sparks)
+	powerUps := make([]types.PowerUp, len(s.PowerUps))
+	copy(powerUps, s.PowerUps)
 	points := make(map[string]int)
 	for k, v := range s.Points {
 		points[k] = v
@@ -93,6 +150,10 @@ func deepCopyState(s *types.GameState) *types.GameState {
 	kills := make(map[string]int)
 	for k, v := range s.Kills {
 		kills[k] = v
+	}
+	killStreaks := make(map[string]int)
+	for k, v := range s.KillStreaks {
+		killStreaks[k] = v
 	}
 	var pausedBy *string
 	if s.PausedBy != nil {
@@ -110,6 +171,9 @@ func deepCopyState(s *types.GameState) *types.GameState {
 		Bullets:           bullets,
 		EnemyBullets:      enemyBullets,
 		Enemies:           enemies,
+		Sparks:            sparks,
+		PowerUps:          powerUps,
+		KillStreaks:       killStreaks,
 		Lives:             s.Lives,
 		Points:            points,
 		Kills:             kills,
@@ -141,18 +205,29 @@ func AddPlayer(matchID, playerID string) *types.Player {
 	}
 
 	x := 200
-	if len(m.State.Players) > 0 {
+	if m.Mode == "solo" {
+		x = 400 // centered for solo
+	} else if len(m.State.Players) > 0 {
 		x = 600
 	}
 	p := types.Player{
-		ID:        playerID,
-		X:         x,
-		Alive:     true,
-		Direction: 0,
-		Lives:     initialLives,
+		ID:         playerID,
+		X:          x,
+		Y:          playerY,
+		Alive:      true,
+		Direction:  0,
+		DirectionY: 0,
+		Lives:      initialLives,
+		SpawnX:     x,
+		SpawnY:     playerY,
 	}
 	m.State.Players = append(m.State.Players, p)
-	if len(m.State.Players) == 2 {
+
+	requiredPlayers := 2
+	if m.Mode == "solo" {
+		requiredPlayers = 1
+	}
+	if len(m.State.Players) == requiredPlayers {
 		m.State.Started = true
 		// Compute total lives for backward compat
 		m.State.Lives = 0
@@ -161,9 +236,11 @@ func AddPlayer(matchID, playerID string) *types.Player {
 		}
 		m.State.Points = make(map[string]int)
 		m.State.Kills = make(map[string]int)
+		m.State.KillStreaks = make(map[string]int)
 		for _, pl := range m.State.Players {
 			m.State.Points[pl.ID] = 0
 			m.State.Kills[pl.ID] = 0
+			m.State.KillStreaks[pl.ID] = 0
 		}
 		// Start wave 1
 		m.State.WaveNumber = 1
@@ -201,13 +278,18 @@ func RemovePlayer(matchID, playerID string) {
 		m.State.Paused = false
 		m.State.PausedBy = nil
 	}
-	if len(m.State.Players) < 2 {
+	requiredPlayers := 2
+	if m.Mode == "solo" {
+		requiredPlayers = 1
+	}
+	if len(m.State.Players) < requiredPlayers {
 		m.State.Started = false
 	}
 }
 
 // SetPlayerDirection sets the movement direction for a player.
-func SetPlayerDirection(matchID, playerID string, dir int) {
+// dirX and dirY are optional — pass nil to leave that axis unchanged.
+func SetPlayerDirection(matchID, playerID string, dirX, dirY *int) {
 	m := match.GetMatch(matchID)
 	if m == nil {
 		return
@@ -219,7 +301,12 @@ func SetPlayerDirection(matchID, playerID string, dir int) {
 	}
 	for i := range m.State.Players {
 		if m.State.Players[i].ID == playerID && m.State.Players[i].Alive {
-			m.State.Players[i].Direction = dir
+			if dirX != nil {
+				m.State.Players[i].Direction = *dirX
+			}
+			if dirY != nil {
+				m.State.Players[i].DirectionY = *dirY
+			}
 			return
 		}
 	}
@@ -236,19 +323,27 @@ func PlayerShoot(matchID, playerID string) {
 	if m.State.Paused || !m.State.Started || m.State.GameOver {
 		return
 	}
-	var px int
+	var px, py int
+	doubleShot := false
 	for i := range m.State.Players {
 		if m.State.Players[i].ID == playerID && m.State.Players[i].Alive {
 			px = m.State.Players[i].X
+			py = m.State.Players[i].Y
+			doubleShot = m.State.Players[i].DoubleShotTimer > 0
 			break
 		}
 	}
-	bullet := types.Bullet{
-		X:       px,
-		Y:       playerY - 10,
-		OwnerID: playerID,
+	if doubleShot {
+		offset := playerWidth / 3
+		m.State.Bullets = append(m.State.Bullets,
+			types.Bullet{X: px - offset, Y: py - 10, OwnerID: playerID},
+			types.Bullet{X: px + offset, Y: py - 10, OwnerID: playerID},
+		)
+	} else {
+		m.State.Bullets = append(m.State.Bullets, types.Bullet{
+			X: px, Y: py - 10, OwnerID: playerID,
+		})
 	}
-	m.State.Bullets = append(m.State.Bullets, bullet)
 }
 
 // PauseGame pauses the match for the given player.
@@ -309,17 +404,32 @@ func Tick(matchID string) {
 	// --- Player respawn timers + invincibility ---
 	tickPlayerRespawn(s)
 
+	// --- Power-up effect timers ---
+	tickPowerUpTimers(s)
+
 	// --- Player movement ---
 	for i := range s.Players {
 		if !s.Players[i].Alive {
 			continue
 		}
-		s.Players[i].X += s.Players[i].Direction * playerSpeed
-		s.Players[i].X = clamp(s.Players[i].X, 20, gameWidth-20)
+		speed := playerSpeed
+		if s.Players[i].SpeedBoostTimer > 0 {
+			speed = playerSpeed * 3 / 2 // 1.5x
+		}
+		s.Players[i].X += s.Players[i].Direction * speed
+		s.Players[i].X = clamp(s.Players[i].X, playerXMin, playerXMax)
+		s.Players[i].Y += s.Players[i].DirectionY * speed
+		s.Players[i].Y = clamp(s.Players[i].Y, playerYMin, playerYMax)
 	}
 
 	// --- Enemy AI (movement + shooting) ---
 	tickEnemyAI(s)
+
+	// --- Decay short-lived visual sparks ---
+	tickSparks(s)
+
+	// --- Player bullets vs enemy bullets (mutual destruction) ---
+	tickBulletsVsBullets(s)
 
 	// --- Move player bullets + check collisions ---
 	tickPlayerBullets(s)
@@ -329,6 +439,9 @@ func Tick(matchID string) {
 
 	// --- Enemy-player collision ---
 	tickEnemyPlayerCollision(s)
+
+	// --- Power-ups: fall + pickup ---
+	tickPowerUps(s)
 
 	// --- Recompute total lives (for HUD backward compat) ---
 	totalLives := 0
@@ -488,6 +601,84 @@ func tickEnemyAI(s *types.GameState) {
 	}
 }
 
+// --- Sparks (transient visual effects) ---
+
+func tickSparks(s *types.GameState) {
+	if len(s.Sparks) == 0 {
+		return
+	}
+	keep := s.Sparks[:0]
+	for _, sp := range s.Sparks {
+		sp.TTL--
+		if sp.TTL > 0 {
+			keep = append(keep, sp)
+		}
+	}
+	s.Sparks = keep
+}
+
+// --- Player bullets vs enemy bullets ---
+
+func tickBulletsVsBullets(s *types.GameState) {
+	if len(s.Bullets) == 0 || len(s.EnemyBullets) == 0 {
+		return
+	}
+	pbHit := make(map[int]bool)
+	ebHit := make(map[int]bool)
+	for pbi, pb := range s.Bullets {
+		for ebi, eb := range s.EnemyBullets {
+			if ebHit[ebi] {
+				continue
+			}
+			if bulletHitBullet(pb.X, pb.Y, eb.X, eb.Y) {
+				pbHit[pbi] = true
+				ebHit[ebi] = true
+				if s.Points != nil {
+					s.Points[pb.OwnerID] += pointsPerBulletShot
+				}
+				s.Sparks = append(s.Sparks, types.Spark{
+					X:    (float64(pb.X) + eb.X) / 2,
+					Y:    (float64(pb.Y) + eb.Y) / 2,
+					TTL:  sparkLifeTicks,
+					Life: sparkLifeTicks,
+					Kind: "bullet",
+				})
+				break
+			}
+		}
+	}
+	if len(pbHit) > 0 {
+		var keep []types.Bullet
+		for i, b := range s.Bullets {
+			if !pbHit[i] {
+				keep = append(keep, b)
+			}
+		}
+		s.Bullets = keep
+	}
+	if len(ebHit) > 0 {
+		var keep []types.EnemyBullet
+		for i, b := range s.EnemyBullets {
+			if !ebHit[i] {
+				keep = append(keep, b)
+			}
+		}
+		s.EnemyBullets = keep
+	}
+}
+
+// bulletHitBullet performs AABB overlap between a player bullet and an enemy bullet
+// using the visual sizes from the exported constants.
+func bulletHitBullet(pbX, pbY int, ebX, ebY float64) bool {
+	pbw2 := float64(BulletWidth) / 2
+	pbh2 := float64(BulletHeight) / 2
+	ebw2 := float64(EnemyBulletWidth) / 2
+	ebh2 := float64(EnemyBulletHeight) / 2
+	px, py := float64(pbX), float64(pbY)
+	return !(px+pbw2 < ebX-ebw2 || px-pbw2 > ebX+ebw2 ||
+		py+pbh2 < ebY-ebh2 || py-pbh2 > ebY+ebh2)
+}
+
 // --- Player bullets vs enemies ---
 
 func tickPlayerBullets(s *types.GameState) {
@@ -505,6 +696,10 @@ func tickPlayerBullets(s *types.GameState) {
 					s.Points[b.OwnerID] += pts
 					s.Kills[b.OwnerID]++
 				}
+				if s.KillStreaks != nil {
+					s.KillStreaks[b.OwnerID]++
+				}
+				maybeDropPowerUp(s, e, b.OwnerID)
 				hits = append(hits, hit{bi, ei})
 				break
 			}
@@ -568,9 +763,14 @@ func tickEnemyBullets(s *types.GameState) {
 				continue
 			}
 			px := s.Players[pi].X
-			if enemyBulletHitPlayer(eb.X, eb.Y, float64(px), float64(playerY)) {
+			if enemyBulletHitPlayer(eb.X, eb.Y, float64(px), float64(s.Players[pi].Y)) {
 				hitPlayer = true
-				killPlayer(&s.Players[pi])
+				if s.Players[pi].ShieldTimer > 0 {
+					// Shield absorbs the hit and drops.
+					s.Players[pi].ShieldTimer = 0
+				} else {
+					killPlayer(s, &s.Players[pi])
+				}
 				break
 			}
 		}
@@ -599,9 +799,13 @@ func tickEnemyPlayerCollision(s *types.GameState) {
 			if !s.Players[pi].Alive || s.Players[pi].InvincibleTimer > 0 {
 				continue
 			}
-			if enemyHitPlayer(e.X, e.Y, s.Players[pi].X, playerY) {
+			if enemyHitPlayer(e.X, e.Y, s.Players[pi].X, s.Players[pi].Y) {
 				hitPlayer = true
-				killPlayer(&s.Players[pi])
+				if s.Players[pi].ShieldTimer > 0 {
+					s.Players[pi].ShieldTimer = 0
+				} else {
+					killPlayer(s, &s.Players[pi])
+				}
 				break
 			}
 		}
@@ -615,16 +819,24 @@ func tickEnemyPlayerCollision(s *types.GameState) {
 // --- Player damage & respawn ---
 
 // killPlayer handles a player taking a hit: lose a life, mark dead, start respawn timer.
-func killPlayer(p *types.Player) {
+// Also resets the player's kill streak and clears active power-up timers.
+func killPlayer(s *types.GameState, p *types.Player) {
 	p.Lives--
 	p.Alive = false
 	p.Direction = 0
+	p.DirectionY = 0
 	if p.Lives > 0 {
 		p.RespawnTimer = respawnTicks
 	} else {
 		p.RespawnTimer = 0 // permanently dead
 	}
 	p.InvincibleTimer = 0
+	p.DoubleShotTimer = 0
+	p.SpeedBoostTimer = 0
+	p.ShieldTimer = 0
+	if s.KillStreaks != nil {
+		s.KillStreaks[p.ID] = 0
+	}
 }
 
 // damageRandomPlayer picks a random alive player and kills them.
@@ -639,7 +851,7 @@ func damageRandomPlayer(s *types.GameState) {
 		return
 	}
 	target := alive[rand.Intn(len(alive))]
-	killPlayer(target)
+	killPlayer(s, target)
 }
 
 // tickPlayerRespawn decrements respawn and invincibility timers, and revives players.
@@ -660,13 +872,118 @@ func tickPlayerRespawn(s *types.GameState) {
 				p.Alive = true
 				p.InvincibleTimer = invincibleTicks
 				// Respawn at starting position
-				if i == 0 {
-					p.X = 200
-				} else {
-					p.X = 600
-				}
+				p.X = p.SpawnX
+				p.Y = p.SpawnY
 				p.Direction = 0
+				p.DirectionY = 0
 			}
+		}
+	}
+}
+
+// --- Power-ups ---
+
+// maybeDropPowerUp decides whether to drop a power-up when an enemy is killed.
+// Base chance depends on enemy type; a guaranteed drop triggers on kill-streak milestones.
+func maybeDropPowerUp(s *types.GameState, e types.Enemy, ownerID string) {
+	streak := 0
+	if s.KillStreaks != nil {
+		streak = s.KillStreaks[ownerID]
+	}
+	guaranteed := streak > 0 && streak%killStreakThreshold == 0
+
+	if !guaranteed {
+		chance := powerUpDropStaticPct
+		if e.Type == "patrol" {
+			chance = powerUpDropPatrolPct
+		}
+		if rand.Intn(100) >= chance {
+			return
+		}
+	}
+	spawnPowerUp(s, e.X, e.Y, guaranteed)
+}
+
+// spawnPowerUp adds a power-up at the given position. If guaranteed is true,
+// the pool is weighted toward more impactful bonuses (shield / double_shot).
+func spawnPowerUp(s *types.GameState, x, y int, guaranteed bool) {
+	var kind string
+	if guaranteed {
+		// Streak reward: weighted pool favoring strong effects.
+		pool := []string{"shield", "shield", "double_shot", "double_shot", "extra_life", "speed_boost", "points_bonus"}
+		kind = pool[rand.Intn(len(pool))]
+	} else {
+		kind = powerUpKinds[rand.Intn(len(powerUpKinds))]
+	}
+	s.PowerUps = append(s.PowerUps, types.PowerUp{X: x, Y: y, Kind: kind})
+}
+
+// tickPowerUps moves power-ups downward and handles pickup by alive players.
+func tickPowerUps(s *types.GameState) {
+	if len(s.PowerUps) == 0 {
+		return
+	}
+	var remaining []types.PowerUp
+	for _, pu := range s.PowerUps {
+		pu.Y += powerUpFallSpeed
+		if pu.Y > gameHeight {
+			continue
+		}
+		picked := false
+		for pi := range s.Players {
+			if !s.Players[pi].Alive {
+				continue
+			}
+			if powerUpHitsPlayer(pu.X, pu.Y, s.Players[pi].X, s.Players[pi].Y) {
+				applyPowerUp(s, &s.Players[pi], pu.Kind)
+				picked = true
+				break
+			}
+		}
+		if !picked {
+			remaining = append(remaining, pu)
+		}
+	}
+	s.PowerUps = remaining
+}
+
+func powerUpHitsPlayer(pux, puy, px, py int) bool {
+	half := PowerUpSize / 2
+	pw2 := playerWidth / 2
+	ph2 := playerHeight / 2
+	return !(pux+half < px-pw2 || pux-half > px+pw2 || puy+half < py-ph2 || puy-half > py+ph2)
+}
+
+// applyPowerUp grants the effect of `kind` to player `p`.
+func applyPowerUp(s *types.GameState, p *types.Player, kind string) {
+	switch kind {
+	case "extra_life":
+		p.Lives++
+	case "double_shot":
+		p.DoubleShotTimer = doubleShotDurationTicks
+	case "speed_boost":
+		p.SpeedBoostTimer = speedBoostDurationTicks
+	case "shield":
+		p.ShieldTimer = shieldDurationTicks
+	case "points_bonus":
+		if s.Points != nil {
+			s.Points[p.ID] += pointsBonusValue
+		}
+	}
+}
+
+// tickPowerUpTimers decrements active power-up timers on each player.
+func tickPowerUpTimers(s *types.GameState) {
+	for i := range s.Players {
+		p := &s.Players[i]
+		if p.DoubleShotTimer > 0 {
+			p.DoubleShotTimer--
+		}
+		if p.SpeedBoostTimer > 0 {
+			p.SpeedBoostTimer--
+		}
+		if p.ShieldTimer > 0 {
+			p.ShieldTimer--
 		}
 	}
 }

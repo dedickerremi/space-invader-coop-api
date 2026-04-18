@@ -27,13 +27,19 @@ func HandleMessage(matchID, playerID string, raw []byte) HandleResult {
 	}
 	switch msg.Type {
 	case "MOVE":
-		dir := 0
+		dirStr, dirYStr := "nil", "nil"
 		if msg.Dir != nil {
-			dir = *msg.Dir
+			dirStr = fmt.Sprintf("%d", *msg.Dir)
 		}
-		game.SetPlayerDirection(matchID, playerID, dir)
+		if msg.DirY != nil {
+			dirYStr = fmt.Sprintf("%d", *msg.DirY)
+		}
+		fmt.Printf("[WS] MOVE from %s: dir=%s dirY=%s\n", playerID, dirStr, dirYStr)
+		game.SetPlayerDirection(matchID, playerID, msg.Dir, msg.DirY)
 	case "STOP":
-		game.SetPlayerDirection(matchID, playerID, 0)
+		fmt.Printf("[WS] STOP from %s\n", playerID)
+		zero := 0
+		game.SetPlayerDirection(matchID, playerID, &zero, &zero)
 	case "SHOOT":
 		game.PlayerShoot(matchID, playerID)
 	case "PAUSE":
@@ -54,7 +60,16 @@ func isValidMessage(msg *types.ClientMessage) bool {
 	}
 	switch msg.Type {
 	case "MOVE":
-		return msg.Dir != nil && (*msg.Dir == -1 || *msg.Dir == 1)
+		if msg.Dir == nil && msg.DirY == nil {
+			return false
+		}
+		if msg.Dir != nil && *msg.Dir != -1 && *msg.Dir != 0 && *msg.Dir != 1 {
+			return false
+		}
+		if msg.DirY != nil && *msg.DirY != -1 && *msg.DirY != 0 && *msg.DirY != 1 {
+			return false
+		}
+		return true
 	case "STOP", "SHOOT", "PAUSE", "RESUME", "EXIT":
 		return true
 	case "PING":
