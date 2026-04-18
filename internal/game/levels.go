@@ -59,9 +59,9 @@ const (
 	gridMargin      = 40
 )
 
-// LoadLevel loads and parses a level JSON file.
+// LoadLevel loads and parses a level JSON file (disk first, embed fallback).
 func LoadLevel(filename string) (*LevelDefinition, error) {
-	data, err := levelFiles.ReadFile("levels/" + filename)
+	data, err := ReadLevelFile(filename)
 	if err != nil {
 		return nil, fmt.Errorf("read level file %s: %w", filename, err)
 	}

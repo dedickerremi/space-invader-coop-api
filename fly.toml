@@ -11,6 +11,11 @@ primary_region = 'ams'
 
 [env]
   PORT = '8080'
+  LEVELS_DIR = '/data/levels'
+
+[[mounts]]
+  source = 'levels_data'
+  destination = '/data'
 
 [http_service]
   internal_port = 8080

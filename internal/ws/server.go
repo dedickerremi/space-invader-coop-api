@@ -46,9 +46,13 @@ func (s *Server) HandleConnection(w http.ResponseWriter, r *http.Request) {
 	token := u.Get("token")
 	matchID := u.Get("matchId")
 	playerID := u.Get("playerId")
+	mode := u.Get("mode")
+	if mode != "solo" && mode != "coop" {
+		mode = "coop"
+	}
 
-	fmt.Printf("[WS] New connection: token=%s..., matchId=%s, playerId=%s\n",
-		trunc(token, 20), matchID, playerID)
+	fmt.Printf("[WS] New connection: token=%s..., matchId=%s, playerId=%s, mode=%s\n",
+		trunc(token, 20), matchID, playerID, mode)
 
 	if token == "" || matchID == "" || playerID == "" {
 		s.Hub.Send(conn, types.ErrorMessage{Type: "ERROR", Reason: "Missing token, matchId or playerId"})
@@ -56,7 +60,7 @@ func (s *Server) HandleConnection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !match.RegisterToken(token, matchID, playerID) {
+	if !match.RegisterToken(token, matchID, playerID, mode) {
 		s.Hub.Send(conn, types.ErrorMessage{Type: "ERROR", Reason: "Cannot join match (full or limit reached)"})
 		time.Sleep(200 * time.Millisecond)
 		return
@@ -71,10 +75,14 @@ func (s *Server) HandleConnection(w http.ResponseWriter, r *http.Request) {
 
 	s.Hub.Register(matchID, playerID, conn)
 	game.AddPlayer(matchID, playerID)
-	fmt.Printf("[WS] Player %s connected to %s (%d/2)\n", playerID, matchID, game.GetPlayerCount(matchID))
+	capacity := 2
+	if mode == "solo" {
+		capacity = 1
+	}
+	fmt.Printf("[WS] Player %s connected to %s (%d/%d)\n", playerID, matchID, game.GetPlayerCount(matchID), capacity)
 
 	// Use SendSafe so the WELCOME write doesn't race with game loop broadcasts
-	s.Hub.SendSafe(matchID, playerID, types.WelcomeMessage{Type: "WELCOME", PlayerID: playerID, MatchID: matchID})
+	s.Hub.SendSafe(matchID, playerID, types.WelcomeMessage{Type: "WELCOME", PlayerID: playerID, MatchID: matchID, Mode: mode})
 
 	// Read loop
 	for {
@@ -127,7 +135,7 @@ done:
 	}
 
 	game.RemovePlayer(matchID, playerID)
-	fmt.Printf("[WS] Player %s disconnected from %s (%d/2)\n", playerID, matchID, game.GetPlayerCount(matchID))
+	fmt.Printf("[WS] Player %s disconnected from %s (%d/%d)\n", playerID, matchID, game.GetPlayerCount(matchID), capacity)
 	if game.GetPlayerCount(matchID) == 0 {
 		match.RemoveMatch(matchID)
 	}
