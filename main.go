@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -9,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"space-invaders-coop/backend-go/internal/db"
 	"space-invaders-coop/backend-go/internal/game"
 	"space-invaders-coop/backend-go/internal/monitoring"
 	"space-invaders-coop/backend-go/internal/ws"
@@ -27,7 +29,15 @@ func main() {
 	wsServer := ws.NewServer(hub)
 	mon := monitoring.NewServer(hub, monitoringPort)
 
-	if err := game.SeedLevelsDir(); err != nil {
+	ctx := context.Background()
+	if err := db.Init(ctx); err != nil {
+		log.Fatalf("[DB] init failed: %v", err)
+	}
+	defer db.Close()
+	if pool := db.Pool(); pool != nil {
+		game.UseDB(pool)
+	}
+	if err := game.SeedLevels(ctx); err != nil {
 		log.Printf("[LEVELS] seed warning: %v", err)
 	}
 
@@ -65,6 +75,7 @@ func main() {
 		mux := http.NewServeMux()
 		mux.HandleFunc("/api/game-meta", handleGameMeta)
 		mux.HandleFunc("/api/stats", monitoring.BasicAuth(mon.HandleAPIStats))
+		mux.HandleFunc("/api/db-status", monitoring.BasicAuth(mon.HandleAPIDBStatus))
 		mux.HandleFunc("/api/levels", monitoring.BasicAuth(monitoring.HandleLevelsList))
 		mux.HandleFunc("/api/levels/", monitoring.BasicAuth(monitoring.HandleLevelByName))
 		mux.HandleFunc("/api/levels/reload", monitoring.BasicAuth(monitoring.HandleLevelsReload))

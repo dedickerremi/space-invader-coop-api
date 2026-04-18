@@ -1,6 +1,7 @@
 package monitoring
 
 import (
+	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"fmt"
@@ -8,6 +9,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"space-invaders-coop/backend-go/internal/db"
 	"space-invaders-coop/backend-go/internal/stats"
 	"space-invaders-coop/backend-go/internal/ws"
 )
@@ -47,6 +49,7 @@ func NewServer(hub *ws.Hub, port int) *Server {
 func (s *Server) Run() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/stats", BasicAuth(s.HandleAPIStats))
+	mux.HandleFunc("/api/db-status", BasicAuth(s.HandleAPIDBStatus))
 	mux.HandleFunc("/api/levels", BasicAuth(HandleLevelsList))
 	mux.HandleFunc("/api/levels/", BasicAuth(HandleLevelByName))
 	mux.HandleFunc("/api/levels/reload", BasicAuth(HandleLevelsReload))
@@ -71,8 +74,22 @@ func (s *Server) HandleDashboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	st := stats.GetServerStats(s.hub)
+	health := db.Health(r.Context())
+	counts, _ := db.GetCounts(r.Context())
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	fmt.Fprint(w, dashboardHTML(st))
+	fmt.Fprint(w, dashboardHTML(st, health, counts))
+}
+
+// HandleAPIDBStatus returns a JSON snapshot of the DB health + row counts.
+func (s *Server) HandleAPIDBStatus(w http.ResponseWriter, r *http.Request) {
+	ctx := context.Background()
+	health := db.Health(ctx)
+	counts, _ := db.GetCounts(ctx)
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"health": health,
+		"counts": counts,
+	})
 }
 
 func formatAge(sec int64) string {
@@ -85,7 +102,25 @@ func formatAge(sec int64) string {
 	return fmt.Sprintf("%dh %dm", sec/3600, (sec%3600)/60)
 }
 
-func dashboardHTML(st stats.ServerStats) string {
+func formatCount(n *int64) string {
+	if n == nil {
+		return "—"
+	}
+	return strconv.FormatInt(*n, 10)
+}
+
+func dbStatusBadge(h db.HealthStatus) (label, color string) {
+	switch {
+	case !h.Configured:
+		return "Not configured", "#888"
+	case h.Connected:
+		return "Connected", "#00ff88"
+	default:
+		return "Error", "#ff4444"
+	}
+}
+
+func dashboardHTML(st stats.ServerStats, health db.HealthStatus, counts db.Counts) string {
 	tableRows := ""
 	for _, m := range st.Matches {
 		status := "Waiting"
@@ -147,6 +182,15 @@ func dashboardHTML(st stats.ServerStats) string {
     <div class="stats-grid">
       <div class="stat-card"><h2>Active Matches</h2><div class="value">` + strconv.Itoa(st.ActiveMatches) + ` / ` + strconv.Itoa(st.MaxMatches) + `</div></div>
       <div class="stat-card"><h2>Total Players</h2><div class="value">` + strconv.Itoa(st.TotalPlayers) + `</div></div>
+      <div class="stat-card"><h2>Database</h2><div class="value" style="color:` + func() string { _, c := dbStatusBadge(health); return c }() + `;font-size:1.25rem">` + func() string { l, _ := dbStatusBadge(health); return html.EscapeString(l) }() + `</div>` + func() string {
+			if health.Error != "" {
+				return `<div style="color:#ff8888;font-size:0.75rem;margin-top:0.5rem;word-break:break-word">` + html.EscapeString(health.Error) + `</div>`
+			}
+			return ""
+		}() + `</div>
+      <div class="stat-card"><h2>Levels (DB)</h2><div class="value">` + formatCount(counts.Levels) + `</div></div>
+      <div class="stat-card"><h2>Games (DB)</h2><div class="value">` + formatCount(counts.Games) + `</div></div>
+      <div class="stat-card"><h2>Users (DB)</h2><div class="value">` + formatCount(counts.Users) + `</div></div>
     </div>
     <div class="matches-table">
       <h2>Active Matches</h2>
@@ -155,7 +199,7 @@ func dashboardHTML(st stats.ServerStats) string {
 		`</tbody></table>
     </div>
   </div>
-  <script>setInterval(() => location.reload(), 2000);</script>
+  <script>setInterval(() => location.reload(), 10000);</script>
 </body>
 </html>`
 }
