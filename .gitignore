@@ -1,4 +1,5 @@
 # Binary
+backend-go
 backend-go-bin
 *.exe
 
