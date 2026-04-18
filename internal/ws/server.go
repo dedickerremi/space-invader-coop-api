@@ -1,6 +1,7 @@
 package ws
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/http"
@@ -8,6 +9,7 @@ import (
 
 	"github.com/gorilla/websocket"
 
+	"space-invaders-coop/backend-go/internal/auth"
 	"space-invaders-coop/backend-go/internal/game"
 	"space-invaders-coop/backend-go/internal/match"
 	"space-invaders-coop/backend-go/internal/types"
@@ -44,6 +46,7 @@ func (s *Server) HandleConnection(w http.ResponseWriter, r *http.Request) {
 
 	u := r.URL.Query()
 	token := u.Get("token")
+	authToken := u.Get("authToken")
 	matchID := u.Get("matchId")
 	playerID := u.Get("playerId")
 	mode := u.Get("mode")
@@ -51,8 +54,8 @@ func (s *Server) HandleConnection(w http.ResponseWriter, r *http.Request) {
 		mode = "coop"
 	}
 
-	fmt.Printf("[WS] New connection: token=%s..., matchId=%s, playerId=%s, mode=%s\n",
-		trunc(token, 20), matchID, playerID, mode)
+	fmt.Printf("[WS] New connection: token=%s..., authToken=%s, matchId=%s, playerId=%s, mode=%s\n",
+		trunc(token, 20), boolLabel(authToken != "", "yes", "no"), matchID, playerID, mode)
 
 	if token == "" || matchID == "" || playerID == "" {
 		s.Hub.Send(conn, types.ErrorMessage{Type: "ERROR", Reason: "Missing token, matchId or playerId"})
@@ -80,6 +83,23 @@ func (s *Server) HandleConnection(w http.ResponseWriter, r *http.Request) {
 		capacity = 1
 	}
 	fmt.Printf("[WS] Player %s connected to %s (%d/%d)\n", playerID, matchID, game.GetPlayerCount(matchID), capacity)
+
+	// Best-effort Clerk auth: a failed verification leaves the player as a guest.
+	if authToken != "" {
+		authCtx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
+		if vu, verr := auth.VerifyToken(authCtx, authToken); verr == nil && vu != nil {
+			displayName, uerr := auth.UpsertUser(authCtx, vu.UserID)
+			if uerr != nil {
+				fmt.Printf("[WS] Upsert user %s failed: %v\n", vu.UserID, uerr)
+				displayName = vu.DisplayName
+			}
+			game.SetPlayerAuth(matchID, playerID, vu.UserID, displayName)
+			fmt.Printf("[WS] Player %s authenticated as %s (%s)\n", playerID, vu.UserID, displayName)
+		} else if verr != nil {
+			fmt.Printf("[WS] authToken rejected for %s: %v\n", playerID, verr)
+		}
+	}
 
 	// Use SendSafe so the WELCOME write doesn't race with game loop broadcasts
 	s.Hub.SendSafe(matchID, playerID, types.WelcomeMessage{Type: "WELCOME", PlayerID: playerID, MatchID: matchID, Mode: mode})
@@ -146,4 +166,11 @@ func trunc(s string, n int) string {
 		return s
 	}
 	return s[:n] + "..."
+}
+
+func boolLabel(b bool, yes, no string) string {
+	if b {
+		return yes
+	}
+	return no
 }

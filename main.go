@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"space-invaders-coop/backend-go/internal/auth"
 	"space-invaders-coop/backend-go/internal/db"
 	"space-invaders-coop/backend-go/internal/game"
 	"space-invaders-coop/backend-go/internal/monitoring"
@@ -34,6 +35,7 @@ func main() {
 		log.Fatalf("[DB] init failed: %v", err)
 	}
 	defer db.Close()
+	auth.Init()
 	if pool := db.Pool(); pool != nil {
 		game.UseDB(pool)
 	}

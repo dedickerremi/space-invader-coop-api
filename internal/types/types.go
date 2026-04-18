@@ -5,6 +5,8 @@ import "sync"
 // Player represents a player in the game.
 type Player struct {
 	ID              string `json:"id"`
+	UserID          string `json:"userId,omitempty"`      // Clerk user id, empty for guests
+	DisplayName     string `json:"displayName,omitempty"` // Clerk profile name (empty for guests)
 	X               int    `json:"x"`
 	Y               int    `json:"y"`
 	Alive           bool   `json:"alive"`

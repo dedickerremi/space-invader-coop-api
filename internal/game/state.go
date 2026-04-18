@@ -287,6 +287,25 @@ func RemovePlayer(matchID, playerID string) {
 	}
 }
 
+// SetPlayerAuth attaches Clerk identity info to a player. Called once
+// after AddPlayer if the WebSocket handshake authenticated successfully.
+// Guests (userID == "") leave the fields empty.
+func SetPlayerAuth(matchID, playerID, userID, displayName string) {
+	m := match.GetMatch(matchID)
+	if m == nil {
+		return
+	}
+	m.Mu.Lock()
+	defer m.Mu.Unlock()
+	for i := range m.State.Players {
+		if m.State.Players[i].ID == playerID {
+			m.State.Players[i].UserID = userID
+			m.State.Players[i].DisplayName = displayName
+			return
+		}
+	}
+}
+
 // SetPlayerDirection sets the movement direction for a player.
 // dirX and dirY are optional — pass nil to leave that axis unchanged.
 func SetPlayerDirection(matchID, playerID string, dirX, dirY *int) {
