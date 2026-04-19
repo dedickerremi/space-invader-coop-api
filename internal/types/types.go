@@ -13,7 +13,6 @@ type Player struct {
 	Direction       int    `json:"direction"`       // -1 left, 0 stopped, 1 right
 	DirectionY      int    `json:"directionY"`      // -1 forward (up), 0 stopped, 1 backward (down)
 	Lives           int    `json:"lives"`            // individual lives
-	RespawnTimer    int    `json:"respawnTimer"`     // ticks until respawn (0 = not respawning)
 	InvincibleTimer int    `json:"invincibleTimer"`  // ticks of invincibility after respawn (0 = vulnerable)
 	DoubleShotTimer int    `json:"doubleShotTimer"`  // ticks of double-shot power-up remaining
 	SpeedBoostTimer int    `json:"speedBoostTimer"`  // ticks of speed-boost power-up remaining

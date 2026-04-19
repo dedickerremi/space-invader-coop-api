@@ -72,8 +72,7 @@ const (
 	waveCooldownTicks = 60        // ~2s pause between waves
 
 	// Player respawn
-	respawnTicks    = 150          // 5s at 30Hz
-	invincibleTicks = 60           // 2s invincibility after respawn
+	invincibleTicks = 90           // 3s invincibility after instant respawn
 
 	// Power-ups
 	doubleShotDurationTicks = 300 // 10s at 30Hz
@@ -397,8 +396,8 @@ func Tick(matchID string) {
 	// --- Wave management ---
 	tickWaveSpawning(s)
 
-	// --- Player respawn timers + invincibility ---
-	tickPlayerRespawn(s)
+	// --- Player invincibility window ---
+	tickInvincibility(s)
 
 	// --- Power-up effect timers ---
 	tickPowerUpTimers(s)
@@ -837,24 +836,27 @@ func tickEnemyPlayerCollision(s *types.GameState) {
 
 // --- Player damage & respawn ---
 
-// killPlayer handles a player taking a hit: lose a life, mark dead, start respawn timer.
-// Also resets the player's kill streak and clears active power-up timers.
+// killPlayer handles a player taking a hit: lose a life, clear power-ups +
+// streak. If the player has lives left, they respawn instantly at their
+// starting position with a temporary invincibility window.
 func killPlayer(s *types.GameState, p *types.Player) {
 	p.Lives--
-	p.Alive = false
 	p.Direction = 0
 	p.DirectionY = 0
-	if p.Lives > 0 {
-		p.RespawnTimer = respawnTicks
-	} else {
-		p.RespawnTimer = 0 // permanently dead
-	}
-	p.InvincibleTimer = 0
 	p.DoubleShotTimer = 0
 	p.SpeedBoostTimer = 0
 	p.ShieldTimer = 0
 	if s.KillStreaks != nil {
 		s.KillStreaks[p.ID] = 0
+	}
+	if p.Lives > 0 {
+		p.Alive = true
+		p.X = p.SpawnX
+		p.Y = p.SpawnY
+		p.InvincibleTimer = invincibleTicks
+	} else {
+		p.Alive = false
+		p.InvincibleTimer = 0
 	}
 }
 
@@ -873,29 +875,13 @@ func damageRandomPlayer(s *types.GameState) {
 	killPlayer(s, target)
 }
 
-// tickPlayerRespawn decrements respawn and invincibility timers, and revives players.
-func tickPlayerRespawn(s *types.GameState) {
+// tickInvincibility decrements each player's invincibility timer. Respawn
+// is now instant (handled in killPlayer) so this is the only remaining
+// lifecycle work between ticks.
+func tickInvincibility(s *types.GameState) {
 	for i := range s.Players {
-		p := &s.Players[i]
-
-		// Tick invincibility
-		if p.InvincibleTimer > 0 {
-			p.InvincibleTimer--
-		}
-
-		// Tick respawn
-		if !p.Alive && p.RespawnTimer > 0 {
-			p.RespawnTimer--
-			if p.RespawnTimer <= 0 {
-				// Respawn!
-				p.Alive = true
-				p.InvincibleTimer = invincibleTicks
-				// Respawn at starting position
-				p.X = p.SpawnX
-				p.Y = p.SpawnY
-				p.Direction = 0
-				p.DirectionY = 0
-			}
+		if s.Players[i].InvincibleTimer > 0 {
+			s.Players[i].InvincibleTimer--
 		}
 	}
 }
