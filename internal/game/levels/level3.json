@@ -1,0 +1,88 @@
+{
+  "waves": [
+    {
+      "name": "Vanguard",
+      "rowDelay": 18,
+      "rows": [
+        "P.P.P.P.P.P.P",
+        "S.S.S.S.S.S.S",
+        ".P.P.P.P.P.P.",
+        "S.S.S.S.S.S.S"
+      ]
+    },
+    {
+      "name": "Meteor Shower",
+      "rowDelay": 14,
+      "rows": [
+        "SS.SS.SS.SS.S",
+        "P...P...P...P",
+        "SS.SS.SS.SS.S",
+        "............."
+      ]
+    },
+    {
+      "name": "Iron Curtain",
+      "rowDelay": 14,
+      "rows": [
+        "SSSSSSSSSSSSS",
+        "SSSSSSSSSSSSS",
+        ".P.P.P.P.P.P.",
+        "............."
+      ]
+    },
+    {
+      "name": "Hailstorm",
+      "rowDelay": 12,
+      "rows": [
+        "P.P.P.P.P.P.P",
+        "S.S.S.S.S.S.S",
+        "P.P.P.P.P.P.P",
+        ".S.S.S.S.S.S.",
+        "P.P.P.P.P.P.P"
+      ]
+    },
+    {
+      "name": "Echelon",
+      "rowDelay": 12,
+      "rows": [
+        "S............",
+        ".S...........",
+        "..S..........",
+        "...S.........",
+        "....S........",
+        ".....S.......",
+        "......P......",
+        ".......S.....",
+        "........S....",
+        ".........S...",
+        "..........S..",
+        "...........S.",
+        "............S"
+      ]
+    },
+    {
+      "name": "Blitz",
+      "rowDelay": 11,
+      "rows": [
+        "PSPSPSPSPSPSP",
+        "SPSPSPSPSPSPS",
+        "PSPSPSPSPSPSP",
+        "SSSSSSSSSSSSS"
+      ]
+    },
+    {
+      "name": "Gauntlet",
+      "rowDelay": 10,
+      "rows": [
+        "PPPPPPPPPPPPP",
+        "SSSSSSSSSSSSS",
+        ".............",
+        "PPPPPPPPPPPPP",
+        "SSSSSSSSSSSSS",
+        ".............",
+        ".P.P.P.P.P.P.",
+        "PPPPPPPPPPPPP"
+      ]
+    }
+  ]
+}

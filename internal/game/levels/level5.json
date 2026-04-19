@@ -1,0 +1,84 @@
+{
+  "waves": [
+    {
+      "name": "Reckoning",
+      "rowDelay": 10,
+      "rows": [
+        "PSPSPSPSPSPSP",
+        "SPSPSPSPSPSPS",
+        "PSPSPSPSPSPSP",
+        "SSSSSSSSSSSSS",
+        "PPPPPPPPPPPPP"
+      ]
+    },
+    {
+      "name": "Obsidian Tide",
+      "rowDelay": 9,
+      "rows": [
+        "PP.PP.PP.PP.P",
+        "SSSSSSSSSSSSS",
+        ".PP.PP.PP.PP.",
+        "SSSSSSSSSSSSS",
+        "PP.PP.PP.PP.P",
+        "SSSSSSSSSSSSS"
+      ]
+    },
+    {
+      "name": "Blackstar",
+      "rowDelay": 8,
+      "rows": [
+        "P...........P",
+        ".P.........P.",
+        "..P.SSSSS.P..",
+        "...PSPSPSP...",
+        "....PSPSP....",
+        "...PSPSPSP...",
+        "..P.SSSSS.P..",
+        ".P.........P.",
+        "P...........P"
+      ]
+    },
+    {
+      "name": "Dreadnaught",
+      "rowDelay": 8,
+      "rows": [
+        "SSSSSSSSSSSSS",
+        "SPPPPPPPPPPPS",
+        "SPSSSSSSSSSPS",
+        "SPSPPPPPPPSPS",
+        "SPSPSSSSSPSPS",
+        "SPSPPPPPPPSPS",
+        "SPSSSSSSSSSPS",
+        "SPPPPPPPPPPPS",
+        "SSSSSSSSSSSSS"
+      ]
+    },
+    {
+      "name": "Final Salvo",
+      "rowDelay": 7,
+      "rows": [
+        "PPPPPPPPPPPPP",
+        "SSSSSSSSSSSSS",
+        "PPPPPPPPPPPPP",
+        "SSSSSSSSSSSSS",
+        "PPPPPPPPPPPPP",
+        "SSSSSSSSSSSSS",
+        "PPPPPPPPPPPPP"
+      ]
+    },
+    {
+      "name": "Ragnarok",
+      "rowDelay": 7,
+      "rows": [
+        "PSPSPSPSPSPSP",
+        "SPSPSPSPSPSPS",
+        "PSPSPSPSPSPSP",
+        "SPSPSPSPSPSPS",
+        "PSPSPSPSPSPSP",
+        "SPSPSPSPSPSPS",
+        "PSPSPSPSPSPSP",
+        "SSSSSSSSSSSSS"
+      ]
+    }
+  ]
+}

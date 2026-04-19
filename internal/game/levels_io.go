@@ -22,6 +22,11 @@ var (
 	levelsMu    sync.RWMutex
 	currentName = "level1.json"
 
+	// levelCache maps level name -> parsed definition. Populated lazily on
+	// first access and cleared wholesale by ReloadCurrentLevel so the editor
+	// "reload" endpoint picks up freshly saved definitions.
+	levelCache = make(map[string]*LevelDefinition)
+
 	// dbPool is the optional Postgres pool. When non-nil, all level storage
 	// operations go through the DB. When nil, the filesystem + embed fallback
 	// is used (useful for local dev without Neon).
@@ -286,19 +291,12 @@ func DeleteLevelFile(name string) error {
 	return os.Remove(path)
 }
 
-// ReloadCurrentLevel re-reads the active level and replaces the in-memory
-// cache. New matches pick up the reloaded definition.
+// ReloadCurrentLevel clears the in-memory level cache. The next Tick that
+// needs a level will re-parse it from the active storage backend. Called by
+// the editor "reload" endpoint after a save.
 func ReloadCurrentLevel() error {
-	data, err := ReadLevelFile(currentName)
-	if err != nil {
-		return err
-	}
-	level, err := ParseLevelJSON(data)
-	if err != nil {
-		return err
-	}
 	levelsMu.Lock()
-	currentLevel = level
+	levelCache = make(map[string]*LevelDefinition)
 	levelsMu.Unlock()
 	return nil
 }
@@ -308,6 +306,55 @@ func CurrentLevelName() string {
 	levelsMu.RLock()
 	defer levelsMu.RUnlock()
 	return currentName
+}
+
+// FirstLevel returns the name of the first level in alphabetical order.
+// Used at match start to pick the initial level. Returns "" when no level
+// is available (caller should treat that as a fatal configuration error).
+func FirstLevel() string {
+	files, err := ListLevelFiles()
+	if err != nil || len(files) == 0 {
+		return ""
+	}
+	return files[0]
+}
+
+// NextLevel returns the level name immediately after `current` in alphabetical
+// order, or "" when `current` is the last level (→ victory condition).
+func NextLevel(current string) string {
+	files, err := ListLevelFiles()
+	if err != nil {
+		return ""
+	}
+	for i, f := range files {
+		if f == current && i+1 < len(files) {
+			return files[i+1]
+		}
+	}
+	return ""
+}
+
+// GetLevelByName returns the parsed level definition for `name`, using a
+// process-wide cache. Returns nil when the level can't be loaded.
+func GetLevelByName(name string) *LevelDefinition {
+	if name == "" {
+		return nil
+	}
+	levelsMu.RLock()
+	cached, ok := levelCache[name]
+	levelsMu.RUnlock()
+	if ok {
+		return cached
+	}
+	level, err := LoadLevel(name)
+	if err != nil {
+		fmt.Printf("[GAME] Warning: could not load level %q: %v\n", name, err)
+		return nil
+	}
+	levelsMu.Lock()
+	levelCache[name] = level
+	levelsMu.Unlock()
+	return level
 }
 
 func validateLevelName(name string) error {
