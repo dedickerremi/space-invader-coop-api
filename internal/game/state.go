@@ -581,18 +581,9 @@ func tickEnemyAI(s *types.GameState) {
 
 		switch e.Type {
 		case "static":
-			// Static: drift down slowly
+			// Static drifts down silently — only patrol enemies shoot so
+			// the bullet volume stays readable at high wave counts.
 			e.Y += staticEnemySpeed
-
-			// Shoot straight down
-			e.ShootTimer--
-			if e.ShootTimer <= 0 {
-				e.ShootTimer = randomShootDelay(EnemyStatic)
-				s.EnemyBullets = append(s.EnemyBullets, types.EnemyBullet{
-					X: float64(e.X), Y: float64(e.Y + enemySize/2),
-					DX: 0, DY: enemyBulletSpeed,
-				})
-			}
 
 		case "patrol":
 			// Patrol: zigzag horizontally + drift down
