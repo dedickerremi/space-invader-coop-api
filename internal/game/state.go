@@ -135,6 +135,11 @@ func deepCopyState(s *types.GameState) *types.GameState {
 		copy(scores, s.GameOverSummary.PlayerScores)
 		summary = &types.GameOverSummary{PlayerScores: scores}
 	}
+	var boss *types.Boss
+	if s.Boss != nil {
+		b := *s.Boss
+		boss = &b
+	}
 	return &types.GameState{
 		Players:           players,
 		Bullets:           bullets,
@@ -157,6 +162,7 @@ func deepCopyState(s *types.GameState) *types.GameState {
 		Victory:           s.Victory,
 		GameOverSummary:   summary,
 		NextWaveCountdown: s.NextWaveCountdown,
+		Boss:              boss,
 	}
 }
 
@@ -420,11 +426,18 @@ func Tick(matchID string) {
 	// --- Enemy AI (movement + shooting) ---
 	tickEnemyAI(s)
 
+	// --- Boss AI (movement + attacks) ---
+	tickBoss(s)
+
 	// --- Decay short-lived visual sparks ---
 	tickSparks(s)
 
 	// --- Player bullets vs enemy bullets (mutual destruction) ---
 	tickBulletsVsBullets(s)
+
+	// --- Player bullets vs boss (before the enemy sweep so the bullet is
+	//     consumed by the boss if it hits, rather than falling through) ---
+	tickBossCollision(s)
 
 	// --- Move player bullets + check collisions ---
 	tickPlayerBullets(s)
@@ -485,9 +498,15 @@ func tickWaveSpawning(s *types.GameState) {
 		return
 	}
 
-	// Between-wave cooldown. When it expires, advance to the next wave —
-	// either within the current level, or on to the next level. When there
-	// is no next level, flip the match into the victory end-state.
+	// Boss fight in progress: no wave spawning or progression. The boss
+	// handler owns the canvas until onBossKilled sets BossDefeated + the
+	// post-boss cooldown.
+	if s.Boss != nil {
+		return
+	}
+
+	// Between-wave cooldown. When it expires, decide what comes next:
+	// next wave, boss fight, next level, or victory.
 	if s.WaveCooldown > 0 {
 		s.WaveCooldown--
 		s.NextWaveCountdown = s.WaveCooldown
@@ -495,7 +514,16 @@ func tickWaveSpawning(s *types.GameState) {
 			return
 		}
 
-		if s.WaveNumber < len(level.Waves) {
+		onLastWave := s.WaveNumber >= len(level.Waves)
+
+		// End of regular waves and the level has a boss we haven't beaten
+		// yet — launch the boss fight instead of advancing.
+		if onLastWave && level.BossKind != "" && !s.BossDefeated {
+			spawnBoss(s, level.BossKind)
+			return
+		}
+
+		if !onLastWave {
 			s.WaveNumber++
 			s.WaveName = level.Waves[s.WaveNumber-1].Name
 			s.WaveTick = 0
@@ -515,6 +543,7 @@ func tickWaveSpawning(s *types.GameState) {
 			s.TotalWaves = len(nextLevel.Waves)
 			s.WaveTick = 0
 			s.WaveCleared = false
+			s.BossDefeated = false
 			level = nextLevel
 		}
 	}

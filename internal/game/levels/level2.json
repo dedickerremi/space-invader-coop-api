@@ -1,4 +1,5 @@
 {
+  "boss": { "kind": "sentinel" },
   "waves": [
     {
       "name": "Scout Wing",

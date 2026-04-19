@@ -35,12 +35,13 @@ type Bullet struct {
 	OwnerID string `json:"ownerId"`
 }
 
-// EnemyBullet represents a bullet fired by an enemy.
+// EnemyBullet represents a bullet fired by an enemy or boss.
 type EnemyBullet struct {
-	X  float64 `json:"x"`
-	Y  float64 `json:"y"`
-	DX float64 `json:"dx"` // velocity X per tick
-	DY float64 `json:"dy"` // velocity Y per tick
+	X    float64 `json:"x"`
+	Y    float64 `json:"y"`
+	DX   float64 `json:"dx"`             // velocity X per tick
+	DY   float64 `json:"dy"`             // velocity Y per tick
+	Kind string  `json:"kind,omitempty"` // "" (default) | "aimed" | "comet" — hint for frontend styling
 }
 
 // Spark is a short-lived visual effect (e.g. bullet-vs-bullet collision).
@@ -76,6 +77,26 @@ type GameOverSummary struct {
 	PlayerScores []PlayerScore `json:"playerScores"`
 }
 
+// Boss is the end-of-level boss entity. Absent from STATE when no boss
+// fight is active. Internal timers (marked `json:"-"`) drive the boss
+// behavior per kind.
+type Boss struct {
+	Kind         string  `json:"kind"` // "sentinel" | "warden" | "citadel" | "nexus"
+	X            float64 `json:"x"`
+	Y            float64 `json:"y"`
+	HP           int     `json:"hp"`
+	MaxHP        int     `json:"maxHp"`
+	Phase        int     `json:"phase"`
+	ShieldActive bool    `json:"shieldActive,omitempty"`
+
+	// Internal — not serialized.
+	PatternDir    int `json:"-"` // horizontal travel direction (-1 / +1)
+	PatternTick   int `json:"-"` // ticks since spawn, for movement curves
+	AttackState   int `json:"-"` // 0 = resting, 1 = firing burst
+	AttackTimer   int `json:"-"` // ticks until next event in the attack cycle
+	AttackShotsLeft int `json:"-"` // bullets remaining in the current burst
+}
+
 // GameState is the full game state for a match.
 type GameState struct {
 	Players           []Player          `json:"players"`
@@ -99,11 +120,13 @@ type GameState struct {
 	Victory           bool              `json:"victory,omitempty"`
 	GameOverSummary   *GameOverSummary  `json:"gameOverSummary,omitempty"`
 	NextWaveCountdown int               `json:"nextWaveCountdown"`
+	Boss              *Boss             `json:"boss,omitempty"`
 
 	// Internal wave tracking (not sent to client)
-	WaveTick      int `json:"-"` // ticks since current wave started
+	WaveTick      int  `json:"-"` // ticks since current wave started
 	WaveCleared   bool `json:"-"` // all enemies from current wave are dead/gone
-	WaveCooldown  int `json:"-"` // ticks to wait before starting next wave
+	WaveCooldown  int  `json:"-"` // ticks to wait before starting next wave
+	BossDefeated  bool `json:"-"` // true once the current level's boss has been killed
 }
 
 // Match holds match metadata and game state.
