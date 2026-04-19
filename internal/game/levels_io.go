@@ -71,14 +71,10 @@ func SeedLevels(ctx context.Context) error {
 }
 
 func seedLevelsDB(ctx context.Context, pool *pgxpool.Pool) error {
-	var count int
-	if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM levels`).Scan(&count); err != nil {
-		return fmt.Errorf("count levels: %w", err)
-	}
-	if count > 0 {
-		return nil
-	}
-
+	// Idempotent: insert every embedded level that isn't already in the DB.
+	// Existing rows are left untouched (admins may have edited them via the
+	// editor). Runs on every boot so newly added embedded levels land on
+	// the next deploy without manual import.
 	entries, err := levelFiles.ReadDir("levels")
 	if err != nil {
 		return err
@@ -92,13 +88,16 @@ func seedLevelsDB(ctx context.Context, pool *pgxpool.Pool) error {
 		if err != nil {
 			return err
 		}
-		if _, err := pool.Exec(ctx,
+		tag, err := pool.Exec(ctx,
 			`INSERT INTO levels (name, definition) VALUES ($1, $2::jsonb)
 			 ON CONFLICT (name) DO NOTHING`,
-			name, string(data)); err != nil {
+			name, string(data))
+		if err != nil {
 			return fmt.Errorf("seed %s: %w", name, err)
 		}
-		fmt.Printf("[LEVELS] Seeded %s into DB\n", name)
+		if tag.RowsAffected() > 0 {
+			fmt.Printf("[LEVELS] Seeded %s into DB\n", name)
+		}
 	}
 	return nil
 }
