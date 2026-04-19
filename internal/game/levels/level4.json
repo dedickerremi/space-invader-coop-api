@@ -1,0 +1,106 @@
+{
+  "waves": [
+    {
+      "name": "Shockwave",
+      "rowDelay": 12,
+      "rows": [
+        "PP.PP.PP.PP.P",
+        "SSSSSSSSSSSSS",
+        "PP.PP.PP.PP.P",
+        "............."
+      ]
+    },
+    {
+      "name": "Crown of Thorns",
+      "rowDelay": 12,
+      "rows": [
+        "P...........P",
+        ".S.........S.",
+        "..P.......P..",
+        "...S.....S...",
+        "....P...P....",
+        ".....S.S.....",
+        "......P......"
+      ]
+    },
+    {
+      "name": "Double Helix",
+      "rowDelay": 10,
+      "rows": [
+        "PS.........SP",
+        ".PS.......SP.",
+        "..PS.....SP..",
+        "...PS...SP...",
+        "....PS.SP....",
+        ".....PSP.....",
+        "....PS.SP....",
+        "...PS...SP...",
+        "..PS.....SP..",
+        ".PS.......SP.",
+        "PS.........SP"
+      ]
+    },
+    {
+      "name": "Flak Cannon",
+      "rowDelay": 10,
+      "rows": [
+        "SSSSSSSSSSSSS",
+        "P.P.P.P.P.P.P",
+        "SSSSSSSSSSSSS",
+        "P.P.P.P.P.P.P",
+        "SSSSSSSSSSSSS",
+        "P.P.P.P.P.P.P",
+        "SSSSSSSSSSSSS"
+      ]
+    },
+    {
+      "name": "Hive Mind",
+      "rowDelay": 9,
+      "rows": [
+        "PSPSPSPSPSPSP",
+        "SPSPSPSPSPSPS",
+        "PSPSPSPSPSPSP",
+        "SPSPSPSPSPSPS",
+        "PSPSPSPSPSPSP"
+      ]
+    },
+    {
+      "name": "Tempest",
+      "rowDelay": 9,
+      "rows": [
+        "P.P.P.P.P.P.P",
+        "SSSSSSSSSSSSS",
+        ".P.P.P.P.P.P.",
+        "SSSSSSSSSSSSS",
+        "P.P.P.P.P.P.P",
+        "SSSSSSSSSSSSS",
+        ".P.P.P.P.P.P."
+      ]
+    },
+    {
+      "name": "Overture",
+      "rowDelay": 8,
+      "rows": [
+        "PPPPPPPPPPPPP",
+        "SSSSSSSSSSSSS",
+        "PPPPPPPPPPPPP",
+        ".P.P.P.P.P.P.",
+        "SSSSSSSSSSSSS",
+        "PPPPPPPPPPPPP"
+      ]
+    },
+    {
+      "name": "Apex",
+      "rowDelay": 8,
+      "rows": [
+        "PSPSPSPSPSPSP",
+        "SSSSSSSSSSSSS",
+        "PSPSPSPSPSPSP",
+        "SSSSSSSSSSSSS",
+        "PPPPPPPPPPPPP",
+        "SSSSSSSSSSSSS",
+        "PSPSPSPSPSPSP"
+      ]
+    }
+  ]
+}

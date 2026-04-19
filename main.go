@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"space-invaders-coop/backend-go/internal/auth"
 	"space-invaders-coop/backend-go/internal/db"
 	"space-invaders-coop/backend-go/internal/game"
 	"space-invaders-coop/backend-go/internal/monitoring"
@@ -34,6 +35,7 @@ func main() {
 		log.Fatalf("[DB] init failed: %v", err)
 	}
 	defer db.Close()
+	auth.Init()
 	if pool := db.Pool(); pool != nil {
 		game.UseDB(pool)
 	}
@@ -80,6 +82,8 @@ func main() {
 		mux.HandleFunc("/api/levels/", monitoring.BasicAuth(monitoring.HandleLevelByName))
 		mux.HandleFunc("/api/levels/reload", monitoring.BasicAuth(monitoring.HandleLevelsReload))
 		mux.HandleFunc("/editor", monitoring.BasicAuth(mon.HandleEditor))
+		mux.HandleFunc("/users", monitoring.BasicAuth(mon.HandleUsersList))
+		mux.HandleFunc("/users/", monitoring.BasicAuth(mon.HandleUserDetail))
 		mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 			if r.URL.Path != "/" {
 				http.NotFound(w, r)

@@ -8,36 +8,6 @@ import (
 	"space-invaders-coop/backend-go/internal/types"
 )
 
-// currentLevel holds the loaded level definition. Initialized on first use.
-var currentLevel *LevelDefinition
-
-func getLevel() *LevelDefinition {
-	levelsMu.RLock()
-	cached := currentLevel
-	levelsMu.RUnlock()
-	if cached != nil {
-		return cached
-	}
-
-	level, err := LoadLevel(CurrentLevelName())
-	if err != nil {
-		fmt.Printf("[GAME] Warning: could not load level: %v, using fallback\n", err)
-		level = &LevelDefinition{
-			Waves: []WaveDefinition{
-				{Number: 1, Spawns: []SpawnEvent{
-					{TickOffset: 0, Kind: EnemyStatic, X: 200, Y: 20},
-					{TickOffset: 0, Kind: EnemyStatic, X: 400, Y: 20},
-					{TickOffset: 0, Kind: EnemyStatic, X: 600, Y: 20},
-				}},
-			},
-		}
-	}
-	levelsMu.Lock()
-	currentLevel = level
-	levelsMu.Unlock()
-	return level
-}
-
 // Exported constants for the /api/game-meta endpoint.
 // Sizes used purely for client rendering (no backend collision impact) are
 // still defined here so the backend remains the single source of truth.
@@ -177,11 +147,15 @@ func deepCopyState(s *types.GameState) *types.GameState {
 		Lives:             s.Lives,
 		Points:            points,
 		Kills:             kills,
+		LevelName:         s.LevelName,
 		WaveNumber:        s.WaveNumber,
+		WaveName:          s.WaveName,
+		TotalWaves:        s.TotalWaves,
 		Started:           s.Started,
 		Paused:            s.Paused,
 		PausedBy:          pausedBy,
 		GameOver:          s.GameOver,
+		Victory:           s.Victory,
 		GameOverSummary:   summary,
 		NextWaveCountdown: s.NextWaveCountdown,
 	}
@@ -242,12 +216,17 @@ func AddPlayer(matchID, playerID string) *types.Player {
 			m.State.Kills[pl.ID] = 0
 			m.State.KillStreaks[pl.ID] = 0
 		}
-		// Start wave 1
+		// Start wave 1 of the first level
+		m.State.LevelName = FirstLevel()
 		m.State.WaveNumber = 1
 		m.State.WaveTick = 0
 		m.State.WaveCleared = false
 		m.State.WaveCooldown = 0
 		m.State.NextWaveCountdown = 0
+		if level := GetLevelByName(m.State.LevelName); level != nil && len(level.Waves) > 0 {
+			m.State.WaveName = level.Waves[0].Name
+			m.State.TotalWaves = len(level.Waves)
+		}
 	}
 	return &p
 }
@@ -284,6 +263,25 @@ func RemovePlayer(matchID, playerID string) {
 	}
 	if len(m.State.Players) < requiredPlayers {
 		m.State.Started = false
+	}
+}
+
+// SetPlayerAuth attaches Clerk identity info to a player. Called once
+// after AddPlayer if the WebSocket handshake authenticated successfully.
+// Guests (userID == "") leave the fields empty.
+func SetPlayerAuth(matchID, playerID, userID, displayName string) {
+	m := match.GetMatch(matchID)
+	if m == nil {
+		return
+	}
+	m.Mu.Lock()
+	defer m.Mu.Unlock()
+	for i := range m.State.Players {
+		if m.State.Players[i].ID == playerID {
+			m.State.Players[i].UserID = userID
+			m.State.Players[i].DisplayName = displayName
+			return
+		}
 	}
 }
 
@@ -396,10 +394,8 @@ func Tick(matchID string) {
 		return
 	}
 
-	level := getLevel()
-
 	// --- Wave management ---
-	tickWaveSpawning(s, level)
+	tickWaveSpawning(s)
 
 	// --- Player respawn timers + invincibility ---
 	tickPlayerRespawn(s)
@@ -460,42 +456,74 @@ func Tick(matchID string) {
 	}
 	if allDead {
 		s.GameOver = true
-		scores := make([]types.PlayerScore, 0, len(s.Players))
-		for _, p := range s.Players {
-			pts, k := 0, 0
-			if s.Points != nil {
-				pts = s.Points[p.ID]
-			}
-			if s.Kills != nil {
-				k = s.Kills[p.ID]
-			}
-			scores = append(scores, types.PlayerScore{PlayerID: p.ID, Points: pts, Kills: k})
-		}
-		s.GameOverSummary = &types.GameOverSummary{PlayerScores: scores}
+		s.GameOverSummary = buildGameOverSummary(s)
 	}
+}
+
+// buildGameOverSummary snapshots each player's points + kills for the
+// end-of-match screen. Used for both defeat (all players permadead) and
+// victory (last wave of last level cleared).
+func buildGameOverSummary(s *types.GameState) *types.GameOverSummary {
+	scores := make([]types.PlayerScore, 0, len(s.Players))
+	for _, p := range s.Players {
+		pts, k := 0, 0
+		if s.Points != nil {
+			pts = s.Points[p.ID]
+		}
+		if s.Kills != nil {
+			k = s.Kills[p.ID]
+		}
+		scores = append(scores, types.PlayerScore{PlayerID: p.ID, Points: pts, Kills: k})
+	}
+	return &types.GameOverSummary{PlayerScores: scores}
 }
 
 // --- Wave spawning ---
 
-func tickWaveSpawning(s *types.GameState, level *LevelDefinition) {
-	// If in cooldown between waves
-	if s.WaveCooldown > 0 {
-		s.WaveCooldown--
-		s.NextWaveCountdown = s.WaveCooldown
-		if s.WaveCooldown <= 0 {
-			// Start next wave
-			s.WaveNumber++
-			s.WaveTick = 0
-			s.WaveCleared = false
-		}
+func tickWaveSpawning(s *types.GameState) {
+	level := GetLevelByName(s.LevelName)
+	if level == nil || len(level.Waves) == 0 {
 		return
 	}
 
-	// Current wave index (loops through level waves)
-	if len(level.Waves) == 0 {
+	// Between-wave cooldown. When it expires, advance to the next wave —
+	// either within the current level, or on to the next level. When there
+	// is no next level, flip the match into the victory end-state.
+	if s.WaveCooldown > 0 {
+		s.WaveCooldown--
+		s.NextWaveCountdown = s.WaveCooldown
+		if s.WaveCooldown > 0 {
+			return
+		}
+
+		if s.WaveNumber < len(level.Waves) {
+			s.WaveNumber++
+			s.WaveName = level.Waves[s.WaveNumber-1].Name
+			s.WaveTick = 0
+			s.WaveCleared = false
+		} else {
+			nextName := NextLevel(s.LevelName)
+			nextLevel := GetLevelByName(nextName)
+			if nextName == "" || nextLevel == nil || len(nextLevel.Waves) == 0 {
+				s.Victory = true
+				s.GameOver = true
+				s.GameOverSummary = buildGameOverSummary(s)
+				return
+			}
+			s.LevelName = nextName
+			s.WaveNumber = 1
+			s.WaveName = nextLevel.Waves[0].Name
+			s.TotalWaves = len(nextLevel.Waves)
+			s.WaveTick = 0
+			s.WaveCleared = false
+			level = nextLevel
+		}
+	}
+
+	waveIdx := s.WaveNumber - 1
+	if waveIdx < 0 || waveIdx >= len(level.Waves) {
 		return
 	}
-	waveIdx := (s.WaveNumber - 1) % len(level.Waves)
 	wave := &level.Waves[waveIdx]
 
 	// Spawn enemies whose tick offset has been reached

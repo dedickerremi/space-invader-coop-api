@@ -54,6 +54,8 @@ func (s *Server) Run() {
 	mux.HandleFunc("/api/levels/", BasicAuth(HandleLevelByName))
 	mux.HandleFunc("/api/levels/reload", BasicAuth(HandleLevelsReload))
 	mux.HandleFunc("/editor", BasicAuth(s.HandleEditor))
+	mux.HandleFunc("/users", BasicAuth(s.HandleUsersList))
+	mux.HandleFunc("/users/", BasicAuth(s.HandleUserDetail))
 	mux.HandleFunc("/", BasicAuth(s.HandleDashboard))
 	addr := ":" + strconv.Itoa(s.port)
 	fmt.Printf("[MONITORING] Dashboard available at http://localhost%s\n", addr)
@@ -178,7 +180,11 @@ func dashboardHTML(st stats.ServerStats, health db.HealthStatus, counts db.Count
 <body>
   <div class="container">
     <h1>Space Invaders Coop - Server Status</h1>
-    <p style="margin-bottom:1.5rem"><a href="/editor" style="color:#00aaff">&rarr; Open Level Editor</a></p>
+    <p style="margin-bottom:1.5rem">
+      <a href="/editor" style="color:#00aaff">&rarr; Open Level Editor</a>
+      &nbsp;·&nbsp;
+      <a href="/users" style="color:#00aaff">&rarr; Browse Users</a>
+    </p>
     <div class="stats-grid">
       <div class="stat-card"><h2>Active Matches</h2><div class="value">` + strconv.Itoa(st.ActiveMatches) + ` / ` + strconv.Itoa(st.MaxMatches) + `</div></div>
       <div class="stat-card"><h2>Total Players</h2><div class="value">` + strconv.Itoa(st.TotalPlayers) + `</div></div>

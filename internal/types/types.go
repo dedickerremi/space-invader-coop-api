@@ -5,6 +5,8 @@ import "sync"
 // Player represents a player in the game.
 type Player struct {
 	ID              string `json:"id"`
+	UserID          string `json:"userId,omitempty"`      // Clerk user id, empty for guests
+	DisplayName     string `json:"displayName,omitempty"` // Clerk profile name (empty for guests)
 	X               int    `json:"x"`
 	Y               int    `json:"y"`
 	Alive           bool   `json:"alive"`
@@ -87,11 +89,15 @@ type GameState struct {
 	Lives             int               `json:"lives"`
 	Points            map[string]int    `json:"points"`  // playerId -> points
 	Kills             map[string]int    `json:"kills"`   // playerId -> kills
+	LevelName         string            `json:"levelName"`
 	WaveNumber        int               `json:"waveNumber"`
+	WaveName          string            `json:"waveName"`
+	TotalWaves        int               `json:"totalWaves"`
 	Started           bool              `json:"started"`
 	Paused            bool              `json:"paused"`
 	PausedBy          *string           `json:"pausedBy,omitempty"`
 	GameOver          bool              `json:"gameOver"`
+	Victory           bool              `json:"victory,omitempty"`
 	GameOverSummary   *GameOverSummary  `json:"gameOverSummary,omitempty"`
 	NextWaveCountdown int               `json:"nextWaveCountdown"`
 
