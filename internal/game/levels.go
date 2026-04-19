@@ -38,19 +38,25 @@ type WaveDefinition struct {
 // --- Level definition ---
 
 type LevelDefinition struct {
-	Waves []WaveDefinition
+	Waves    []WaveDefinition
+	BossKind string // "" = no boss at the end of this level
 }
 
 // --- JSON schema ---
 
 type jsonLevel struct {
 	Waves []jsonWave `json:"waves"`
+	Boss  *jsonBoss  `json:"boss,omitempty"`
 }
 
 type jsonWave struct {
 	Name     string   `json:"name"`
 	RowDelay int      `json:"rowDelay"` // ticks between rows (default 30)
 	Rows     []string `json:"rows"`
+}
+
+type jsonBoss struct {
+	Kind string `json:"kind"`
 }
 
 const (
@@ -138,7 +144,11 @@ func ParseLevelJSON(data []byte) (*LevelDefinition, error) {
 		return nil, fmt.Errorf("no valid waves in level")
 	}
 
-	fmt.Printf("[LEVELS] Loaded %d waves\n", len(level.Waves))
+	if raw.Boss != nil {
+		level.BossKind = raw.Boss.Kind
+	}
+
+	fmt.Printf("[LEVELS] Loaded %d waves (boss=%q)\n", len(level.Waves), level.BossKind)
 	for _, w := range level.Waves {
 		fmt.Printf("[LEVELS]   Wave %d (%s): %d enemies\n", w.Number, w.Name, len(w.Spawns))
 	}
