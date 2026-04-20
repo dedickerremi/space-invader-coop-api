@@ -66,8 +66,11 @@ func spawnBoss(s *types.GameState, kind string) {
 		AttackState: 0,
 		AttackTimer: 60, // 2s grace before first attack burst
 	}
-	if kind == BossWarden {
+	switch kind {
+	case BossWarden:
 		s.Boss.SummonTimer = wardenFirstSummonDelay
+	case BossNexus:
+		s.Boss.SummonTimer = nexusFirstSummonDelay
 	}
 	s.WaveName = bossDisplayName(kind)
 }
@@ -101,6 +104,8 @@ func tickBoss(s *types.GameState) {
 		tickWarden(s)
 	case BossCitadel:
 		tickCitadel(s)
+	case BossNexus:
+		tickNexus(s)
 	}
 }
 
@@ -356,6 +361,154 @@ func fireCometSpread(s *types.GameState, bx, by, speed float64, count int, sprea
 			DX:   math.Cos(a) * speed,
 			DY:   math.Sin(a) * speed,
 			Kind: "comet",
+		})
+	}
+}
+
+// --- Nexus (level 5, finale) ---
+//
+// Behavior:
+//   - Phase 1 (HP > 50%): wide horizontal sweep, shallow bob. Alternates
+//     between aimed 4-shot bursts and 5-comet fans, ~3s between attacks.
+//     Summons 1 patrol escort every 8s, capped at 3 alive.
+//   - Phase 2 (HP <= 50%): Phase field flips to 2. Faster sweep, shorter
+//     rest (~2s), wider 7-comet fans. Summons 2 escorts every 6s capped
+//     at 4 alive. Everything more aggressive.
+//   - No shield: the fight is about sustained pressure, not windows.
+
+const (
+	nexusSpeedXP1       = 1.4
+	nexusSpeedXP2       = 2.0
+	nexusBobAmplitude   = 20.0
+	nexusBobPeriodTick  = 140
+	nexusBobCenterY     = 130.0
+
+	nexusAimBurstShots     = 4
+	nexusAimShotInterval   = 10
+	nexusAimBulletSpeed    = 5.0
+
+	nexusCometSpeed        = 5.5
+	nexusCometCountP1      = 5
+	nexusCometCountP2      = 7
+	nexusCometSpreadDegP1  = 24.0
+	nexusCometSpreadDegP2  = 32.0
+
+	nexusRestTicksP1   = 90 // 3s between attack types
+	nexusRestTicksP2   = 60 // 2s in phase 2
+
+	nexusFirstSummonDelay = 120 // 4s before first escort
+	nexusSummonIntervalP1 = 240 // 8s
+	nexusSummonIntervalP2 = 180 // 6s
+	nexusSummonCountP1    = 1
+	nexusSummonCountP2    = 2
+	nexusMaxEscortsP1     = 3
+	nexusMaxEscortsP2     = 4
+	nexusEscortOffsetX    = 70
+	nexusEscortOffsetY    = 45
+)
+
+func tickNexus(s *types.GameState) {
+	b := s.Boss
+
+	// --- Phase transition at 50% HP ---
+	if b.Phase == 1 && b.HP*2 <= b.MaxHP {
+		b.Phase = 2
+		// Give the new phase immediate pressure: pick a short warm-up so
+		// the player feels the shift rather than coasting through a rest.
+		if b.AttackTimer > 20 {
+			b.AttackTimer = 20
+		}
+	}
+
+	// --- Movement (speed scales with phase) ---
+	speedX := nexusSpeedXP1
+	if b.Phase >= 2 {
+		speedX = nexusSpeedXP2
+	}
+	b.X += float64(b.PatternDir) * speedX
+	if b.X >= bossArenaXMax {
+		b.X = bossArenaXMax
+		b.PatternDir = -1
+	} else if b.X <= bossArenaXMin {
+		b.X = bossArenaXMin
+		b.PatternDir = 1
+	}
+	b.Y = nexusBobCenterY + nexusBobAmplitude*math.Sin(
+		2*math.Pi*float64(b.PatternTick)/float64(nexusBobPeriodTick),
+	)
+
+	// --- Escort summons ---
+	summonInterval := nexusSummonIntervalP1
+	summonCount := nexusSummonCountP1
+	maxEscorts := nexusMaxEscortsP1
+	if b.Phase >= 2 {
+		summonInterval = nexusSummonIntervalP2
+		summonCount = nexusSummonCountP2
+		maxEscorts = nexusMaxEscortsP2
+	}
+	if b.SummonTimer > 0 {
+		b.SummonTimer--
+	}
+	if b.SummonTimer <= 0 {
+		if countPatrolEnemies(s) < maxEscorts {
+			spawnNexusEscorts(s, b, summonCount)
+		}
+		b.SummonTimer = summonInterval
+	}
+
+	// --- Attack cycle: alternates aimed burst and comet spread ---
+	restTicks := nexusRestTicksP1
+	if b.Phase >= 2 {
+		restTicks = nexusRestTicksP2
+	}
+	b.AttackTimer--
+	if b.AttackTimer > 0 {
+		return
+	}
+	switch b.AttackState {
+	case 0: // rest ended → start aimed burst
+		b.AttackState = 1
+		b.AttackShotsLeft = nexusAimBurstShots
+		fallthrough
+	case 1: // fire one aimed shot
+		fireAimedBullet(s, b.X, b.Y, nexusAimBulletSpeed)
+		b.AttackShotsLeft--
+		if b.AttackShotsLeft <= 0 {
+			b.AttackState = 2
+			b.AttackTimer = restTicks
+		} else {
+			b.AttackTimer = nexusAimShotInterval
+		}
+	case 2: // rest ended → fire comet spread, then back to aim cycle
+		cometCount := nexusCometCountP1
+		spread := nexusCometSpreadDegP1
+		if b.Phase >= 2 {
+			cometCount = nexusCometCountP2
+			spread = nexusCometSpreadDegP2
+		}
+		fireCometSpread(s, b.X, b.Y, nexusCometSpeed, cometCount, spread)
+		b.AttackState = 0
+		b.AttackTimer = restTicks
+	}
+}
+
+// spawnNexusEscorts drops `count` patrol escorts, alternating left/right
+// of the boss. Same enemy type as wave-spawned patrols.
+func spawnNexusEscorts(s *types.GameState, b *types.Boss, count int) {
+	portY := int(b.Y) + nexusEscortOffsetY
+	for i := 0; i < count; i++ {
+		side := 1
+		if i%2 == 0 {
+			side = -1
+		}
+		x := int(b.X) + side*nexusEscortOffsetX
+		s.Enemies = append(s.Enemies, types.Enemy{
+			X:          x,
+			Y:          portY,
+			Type:       string(EnemyPatrol),
+			SpawnX:     x,
+			PatternDir: side,
+			ShootTimer: randomShootDelay(EnemyPatrol),
 		})
 	}
 }

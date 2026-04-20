@@ -1,4 +1,5 @@
 {
+  "boss": { "kind": "nexus" },
   "waves": [
     {
       "name": "Reckoning",
