@@ -95,6 +95,7 @@ type Boss struct {
 	AttackState   int `json:"-"` // 0 = resting, 1 = firing burst
 	AttackTimer   int `json:"-"` // ticks until next event in the attack cycle
 	AttackShotsLeft int `json:"-"` // bullets remaining in the current burst
+	SummonTimer   int `json:"-"` // ticks until the next escort summon (warden)
 }
 
 // GameState is the full game state for a match.

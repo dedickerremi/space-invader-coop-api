@@ -66,6 +66,9 @@ func spawnBoss(s *types.GameState, kind string) {
 		AttackState: 0,
 		AttackTimer: 60, // 2s grace before first attack burst
 	}
+	if kind == BossWarden {
+		s.Boss.SummonTimer = wardenFirstSummonDelay
+	}
 	s.WaveName = bossDisplayName(kind)
 }
 
@@ -94,6 +97,8 @@ func tickBoss(s *types.GameState) {
 	switch s.Boss.Kind {
 	case BossSentinel:
 		tickSentinel(s)
+	case BossWarden:
+		tickWarden(s)
 	}
 }
 
@@ -153,6 +158,110 @@ func tickSentinel(s *types.GameState) {
 			b.AttackTimer = sentinelBurstInterval
 		}
 	}
+}
+
+// --- Warden (level 3) ---
+//
+// Behavior:
+//   - Wider, slower horizontal sweep than Sentinel; shallow vertical bob.
+//   - Periodically summons up to 4 patrol escorts from its side ports.
+//     Each summon drops 2 escorts (one per side), cooldown 5s. New summons
+//     are skipped if 4+ patrol enemies are already alive on the canvas.
+//   - Attack cycle: 3 aimed shots spaced 14 ticks, then rests 2.5s.
+
+const (
+	wardenSpeedX           = 1.2
+	wardenBobAmplitude     = 15.0
+	wardenBobPeriodTick    = 150
+	wardenBobCenterY       = 130.0
+	wardenBulletSpeed      = 4.5
+	wardenBurstShots       = 3
+	wardenBurstInterval    = 14
+	wardenRestTicks        = 75 // 2.5s between bursts
+
+	wardenFirstSummonDelay = 90  // 3s before first escort wave
+	wardenSummonInterval   = 150 // 5s between summon attempts
+	wardenMaxEscorts       = 4
+	wardenEscortOffsetX    = 60
+	wardenEscortOffsetY    = 40
+)
+
+func tickWarden(s *types.GameState) {
+	b := s.Boss
+
+	// --- Movement (wider sweep, shallower bob) ---
+	b.X += float64(b.PatternDir) * wardenSpeedX
+	if b.X >= bossArenaXMax {
+		b.X = bossArenaXMax
+		b.PatternDir = -1
+	} else if b.X <= bossArenaXMin {
+		b.X = bossArenaXMin
+		b.PatternDir = 1
+	}
+	b.Y = wardenBobCenterY + wardenBobAmplitude*math.Sin(
+		2*math.Pi*float64(b.PatternTick)/float64(wardenBobPeriodTick),
+	)
+
+	// --- Escort summons (independent of the aimed-shot cycle) ---
+	if b.SummonTimer > 0 {
+		b.SummonTimer--
+	}
+	if b.SummonTimer <= 0 {
+		if countPatrolEnemies(s) < wardenMaxEscorts {
+			spawnWardenEscorts(s, b)
+		}
+		b.SummonTimer = wardenSummonInterval
+	}
+
+	// --- Attack cycle (aimed shots) ---
+	b.AttackTimer--
+	if b.AttackTimer > 0 {
+		return
+	}
+	switch b.AttackState {
+	case 0:
+		b.AttackState = 1
+		b.AttackShotsLeft = wardenBurstShots
+		fallthrough
+	case 1:
+		fireAimedBullet(s, b.X, b.Y, wardenBulletSpeed)
+		b.AttackShotsLeft--
+		if b.AttackShotsLeft <= 0 {
+			b.AttackState = 0
+			b.AttackTimer = wardenRestTicks
+		} else {
+			b.AttackTimer = wardenBurstInterval
+		}
+	}
+}
+
+// spawnWardenEscorts drops two patrol enemies — one from each side port of
+// the boss. They act like normal patrol enemies from that point on.
+func spawnWardenEscorts(s *types.GameState, b *types.Boss) {
+	portY := int(b.Y) + wardenEscortOffsetY
+	for _, side := range []int{-1, 1} {
+		x := int(b.X) + side*wardenEscortOffsetX
+		s.Enemies = append(s.Enemies, types.Enemy{
+			X:          x,
+			Y:          portY,
+			Type:       string(EnemyPatrol),
+			SpawnX:     x,
+			PatternDir: side,
+			ShootTimer: randomShootDelay(EnemyPatrol),
+		})
+	}
+}
+
+// countPatrolEnemies returns how many patrol-type enemies are alive. During
+// a boss fight no regular-wave enemies spawn, so this count = escort count.
+func countPatrolEnemies(s *types.GameState) int {
+	n := 0
+	for i := range s.Enemies {
+		if s.Enemies[i].Type == string(EnemyPatrol) {
+			n++
+		}
+	}
+	return n
 }
 
 // fireAimedBullet shoots a bullet from (bx, by) toward the nearest alive
