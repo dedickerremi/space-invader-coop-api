@@ -99,6 +99,8 @@ func tickBoss(s *types.GameState) {
 		tickSentinel(s)
 	case BossWarden:
 		tickWarden(s)
+	case BossCitadel:
+		tickCitadel(s)
 	}
 }
 
@@ -262,6 +264,100 @@ func countPatrolEnemies(s *types.GameState) int {
 		}
 	}
 	return n
+}
+
+// --- Citadel (level 4) ---
+//
+// Behavior:
+//   - Slow horizontal drift in a tight central arena with a gentle bob.
+//   - Hard shield cycle: 10s invulnerable, 5s open. When shielded, player
+//     bullets bounce off with sparks (handled in tickBossCollision).
+//   - Fires a 3-comet fan aimed at the nearest player every 45 ticks in
+//     both phases — vulnerable window is short, so the player has to dodge
+//     AND dps at the same time.
+
+const (
+	citadelSpeedX         = 0.8
+	citadelBobAmplitude   = 10.0
+	citadelBobPeriodTick  = 180
+	citadelBobCenterY     = 140.0
+	citadelArenaXMin      = 150
+	citadelArenaXMax      = gameWidth - 150
+
+	citadelShieldedTicks  = 300 // 10s shielded
+	citadelVulnerableTicks = 150 // 5s open
+	citadelCycleTicks     = citadelShieldedTicks + citadelVulnerableTicks
+
+	citadelCometSpeed     = 5.5
+	citadelSpreadCount    = 3
+	citadelSpreadDeg      = 18.0 // total fan half-angle in degrees
+	citadelShotInterval   = 45
+)
+
+func tickCitadel(s *types.GameState) {
+	b := s.Boss
+
+	// --- Movement ---
+	b.X += float64(b.PatternDir) * citadelSpeedX
+	if b.X >= citadelArenaXMax {
+		b.X = citadelArenaXMax
+		b.PatternDir = -1
+	} else if b.X <= citadelArenaXMin {
+		b.X = citadelArenaXMin
+		b.PatternDir = 1
+	}
+	b.Y = citadelBobCenterY + citadelBobAmplitude*math.Sin(
+		2*math.Pi*float64(b.PatternTick)/float64(citadelBobPeriodTick),
+	)
+
+	// --- Shield cycle (derived from PatternTick — no extra state needed) ---
+	cyclePos := b.PatternTick % citadelCycleTicks
+	b.ShieldActive = cyclePos < citadelShieldedTicks
+
+	// --- Attack: spread of comets, same cadence in both phases ---
+	b.AttackTimer--
+	if b.AttackTimer > 0 {
+		return
+	}
+	fireCometSpread(s, b.X, b.Y, citadelCometSpeed, citadelSpreadCount, citadelSpreadDeg)
+	b.AttackTimer = citadelShotInterval
+}
+
+// fireCometSpread emits `count` comet bullets in a symmetric fan around the
+// aim vector toward the nearest alive player. `spreadDeg` is the half-angle
+// (degrees) — bullets are evenly distributed between -spreadDeg and
+// +spreadDeg. Comets use kind="comet" for frontend trail rendering.
+func fireCometSpread(s *types.GameState, bx, by, speed float64, count int, spreadDeg float64) {
+	target := nearestAlivePlayer(s, bx, by)
+	if target == nil {
+		return
+	}
+	dx := float64(target.X) - bx
+	dy := float64(target.Y) - by
+	dist := math.Hypot(dx, dy)
+	if dist < 1 {
+		dist = 1
+	}
+	baseAngle := math.Atan2(dy, dx)
+	spreadRad := spreadDeg * math.Pi / 180.0
+
+	for i := 0; i < count; i++ {
+		var offset float64
+		if count == 1 {
+			offset = 0
+		} else {
+			// Distribute evenly across [-spreadRad, +spreadRad].
+			offset = -spreadRad + 2*spreadRad*float64(i)/float64(count-1)
+		}
+		a := baseAngle + offset
+		s.EnemyBullets = append(s.EnemyBullets, types.EnemyBullet{
+			X:    bx,
+			Y:    by,
+			DX:   math.Cos(a) * speed,
+			DY:   math.Sin(a) * speed,
+			Kind: "comet",
+		})
+	}
 }
 
 // fireAimedBullet shoots a bullet from (bx, by) toward the nearest alive

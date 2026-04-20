@@ -1,4 +1,5 @@
 {
+  "boss": { "kind": "citadel" },
   "waves": [
     {
       "name": "Shockwave",
