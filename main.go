@@ -13,7 +13,9 @@ import (
 	"space-invaders-coop/backend-go/internal/auth"
 	"space-invaders-coop/backend-go/internal/db"
 	"space-invaders-coop/backend-go/internal/game"
+	"space-invaders-coop/backend-go/internal/match"
 	"space-invaders-coop/backend-go/internal/monitoring"
+	"space-invaders-coop/backend-go/internal/stats"
 	"space-invaders-coop/backend-go/internal/ws"
 )
 
@@ -42,6 +44,11 @@ func main() {
 	if err := game.SeedLevels(ctx); err != nil {
 		log.Printf("[LEVELS] seed warning: %v", err)
 	}
+
+	// Register the match-end persistence callback. Fires once per match
+	// (game over / victory / abandoned) from the game loop or the match
+	// removal path. Best-effort: swallows DB errors.
+	match.SetFinalizer(stats.FinalizeMatch)
 
 	// Start game loop in background (broadcasts state via hub)
 	go game.StartLoop(hub)
@@ -84,6 +91,7 @@ func main() {
 		mux.HandleFunc("/editor", monitoring.BasicAuth(mon.HandleEditor))
 		mux.HandleFunc("/users", monitoring.BasicAuth(mon.HandleUsersList))
 		mux.HandleFunc("/users/", monitoring.BasicAuth(mon.HandleUserDetail))
+		mux.HandleFunc("/matches", monitoring.BasicAuth(mon.HandleMatchesList))
 		mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 			if r.URL.Path != "/" {
 				http.NotFound(w, r)

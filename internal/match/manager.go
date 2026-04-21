@@ -14,7 +14,30 @@ var (
 	mu           sync.RWMutex
 	matches      = make(map[string]*types.Match)
 	tokenToPlayer = make(map[string]struct{ MatchID, PlayerID string })
+
+	finalizerMu sync.RWMutex
+	finalizer   func(*types.MatchSnapshot)
 )
+
+// SetFinalizer registers a callback that is fired once per match when it
+// ends (game over / victory / abandoned). The stats package wires this at
+// boot. match is the bottom of the dependency tree so callers can import
+// match without creating cycles.
+func SetFinalizer(f func(*types.MatchSnapshot)) {
+	finalizerMu.Lock()
+	defer finalizerMu.Unlock()
+	finalizer = f
+}
+
+func fireFinalizer(snap *types.MatchSnapshot) {
+	finalizerMu.RLock()
+	f := finalizer
+	finalizerMu.RUnlock()
+	if f == nil || snap == nil {
+		return
+	}
+	go f(snap)
+}
 
 func createInitialState() types.GameState {
 	return types.GameState{
@@ -109,6 +132,52 @@ func RegisterToken(token, matchID, playerID, mode string) bool {
 	return true
 }
 
+// SetMetadataIfEmpty stamps client metadata onto the match the first time
+// a field is set. Later joiners do not overwrite — first-joiner wins, so
+// the match row reflects who started the session.
+func SetMetadataIfEmpty(matchID string, meta types.MatchMetadata) {
+	mu.Lock()
+	defer mu.Unlock()
+	m, ok := matches[matchID]
+	if !ok {
+		return
+	}
+	if m.Metadata.UserAgent != "" || m.Metadata.IPHash != "" {
+		return
+	}
+	m.Metadata = meta
+}
+
+// SetMatchCountry fills in the country code for a match if it isn't
+// already set. Called asynchronously after a best-effort GeoIP lookup so
+// it shouldn't block the handshake.
+func SetMatchCountry(matchID, country string) {
+	if country == "" {
+		return
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	m, ok := matches[matchID]
+	if !ok || m.Metadata.Country != "" {
+		return
+	}
+	m.Metadata.Country = country
+}
+
+// MarkPersisted flags a match as already written to the DB so subsequent
+// cleanup paths don't write a second row. Returns true if this call was
+// the one to set the flag (caller owns the write).
+func MarkPersisted(matchID string) bool {
+	mu.Lock()
+	defer mu.Unlock()
+	m, ok := matches[matchID]
+	if !ok || m.Persisted {
+		return false
+	}
+	m.Persisted = true
+	return true
+}
+
 // ValidateToken returns matchID and playerID for a token, or empty strings if invalid.
 func ValidateToken(token string) (matchID, playerID string) {
 	mu.RLock()
@@ -131,19 +200,83 @@ func GetMatch(matchID string) *types.Match {
 	return m
 }
 
-// RemoveMatch removes a match and cleans up token lookups.
+// RemoveMatch removes a match and cleans up token lookups. If the match
+// was never persisted (game-over / victory did not fire the finalizer),
+// an "abandoned" snapshot is dispatched before the match is dropped.
 func RemoveMatch(matchID string) {
 	mu.Lock()
-	defer mu.Unlock()
 	m, ok := matches[matchID]
 	if !ok {
+		mu.Unlock()
 		return
+	}
+	var abandoned *types.MatchSnapshot
+	if !m.Persisted {
+		abandoned = buildSnapshotLocked(m, "abandoned")
+		m.Persisted = true
 	}
 	for _, token := range m.Tokens {
 		delete(tokenToPlayer, token)
 	}
 	delete(matches, matchID)
+	mu.Unlock()
 	fmt.Printf("[MATCH] Removed %s\n", matchID)
+	if abandoned != nil {
+		fireFinalizer(abandoned)
+	}
+}
+
+// Snapshot builds a MatchSnapshot for persistence under the match lock.
+// Returns nil if the match is unknown. Safe to call from the game loop
+// before the match is removed.
+func Snapshot(matchID, outcome string) *types.MatchSnapshot {
+	mu.RLock()
+	m, ok := matches[matchID]
+	mu.RUnlock()
+	if !ok {
+		return nil
+	}
+	return buildSnapshotLocked(m, outcome)
+}
+
+// FireFinalizer dispatches the snapshot to the registered callback.
+// Exported so callers (game loop) can build + fire without touching the
+// package-private state directly.
+func FireFinalizer(snap *types.MatchSnapshot) {
+	fireFinalizer(snap)
+}
+
+func buildSnapshotLocked(m *types.Match, outcome string) *types.MatchSnapshot {
+	m.Mu.RLock()
+	defer m.Mu.RUnlock()
+
+	participants := make([]types.ParticipantSnapshot, 0, len(m.State.Players))
+	for _, p := range m.State.Players {
+		participants = append(participants, types.ParticipantSnapshot{
+			UserID:      p.UserID,
+			DisplayName: p.DisplayName,
+			Points:      m.State.Points[p.ID],
+			Kills:       m.State.Kills[p.ID],
+			Deaths:      m.State.Deaths[p.ID],
+			BestStreak:  m.State.BestStreaks[p.ID],
+		})
+	}
+
+	bosses := make([]string, len(m.State.BossesKilled))
+	copy(bosses, m.State.BossesKilled)
+
+	return &types.MatchSnapshot{
+		MatchID:      m.MatchID,
+		Mode:         m.Mode,
+		Outcome:      outcome,
+		StartedAt:    m.CreatedAt,
+		EndedAt:      time.Now().UnixMilli(),
+		LevelName:    m.State.LevelName,
+		WaveReached:  m.State.WaveNumber,
+		BossesKilled: bosses,
+		Metadata:     m.Metadata,
+		Participants: participants,
+	}
 }
 
 // GetAllMatches returns a snapshot of all matches (caller must not mutate).

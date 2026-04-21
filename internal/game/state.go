@@ -216,10 +216,14 @@ func AddPlayer(matchID, playerID string) *types.Player {
 		m.State.Points = make(map[string]int)
 		m.State.Kills = make(map[string]int)
 		m.State.KillStreaks = make(map[string]int)
+		m.State.Deaths = make(map[string]int)
+		m.State.BestStreaks = make(map[string]int)
 		for _, pl := range m.State.Players {
 			m.State.Points[pl.ID] = 0
 			m.State.Kills[pl.ID] = 0
 			m.State.KillStreaks[pl.ID] = 0
+			m.State.Deaths[pl.ID] = 0
+			m.State.BestStreaks[pl.ID] = 0
 		}
 		// Start wave 1 of the first level
 		m.State.LevelName = FirstLevel()
@@ -745,6 +749,9 @@ func tickPlayerBullets(s *types.GameState) {
 				}
 				if s.KillStreaks != nil {
 					s.KillStreaks[b.OwnerID]++
+					if s.BestStreaks != nil && s.KillStreaks[b.OwnerID] > s.BestStreaks[b.OwnerID] {
+						s.BestStreaks[b.OwnerID] = s.KillStreaks[b.OwnerID]
+					}
 				}
 				maybeDropPowerUp(s, e, b.OwnerID)
 				hits = append(hits, hit{bi, ei})
@@ -877,6 +884,9 @@ func killPlayer(s *types.GameState, p *types.Player) {
 	p.ShieldTimer = 0
 	if s.KillStreaks != nil {
 		s.KillStreaks[p.ID] = 0
+	}
+	if s.Deaths != nil {
+		s.Deaths[p.ID]++
 	}
 	if p.Lives > 0 {
 		p.Alive = true
