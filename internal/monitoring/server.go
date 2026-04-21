@@ -33,6 +33,25 @@ func BasicAuth(h http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+// buildInfo is populated at boot from main's ldflags-injected vars.
+// Used by the dashboard so operators can see what SHA is running without
+// leaving the admin UI.
+var (
+	buildVersion   = "dev"
+	buildTimestamp = "unknown"
+)
+
+// SetBuildInfo is called from main.go at boot to stamp the running
+// build's commit SHA and timestamp.
+func SetBuildInfo(version, buildTime string) {
+	if version != "" {
+		buildVersion = version
+	}
+	if buildTime != "" {
+		buildTimestamp = buildTime
+	}
+}
+
 // Server is the HTTP monitoring server.
 type Server struct {
 	hub  *ws.Hub
@@ -174,12 +193,17 @@ func dashboardHTML(st ServerStats, health db.HealthStatus, counts db.Counts) str
     .badge.started { background: #00ff88; color: #000; }
     .badge.waiting { background: #ffaa00; color: #000; }
     .badge.paused { background: #ff4444; color: #fff; }
+    .pill { display: inline-block; background: #15151d; color: #00ff88; border: 1px solid #333; padding: 0.1rem 0.6rem; border-radius: 999px; font-size: 0.75rem; margin-right: 0.5rem; font-weight: bold; }
     .empty { text-align: center; color: #666; padding: 2rem; }
   </style>
 </head>
 <body>
   <div class="container">
     <h1>Space Invaders Coop - Server Status</h1>
+    <p style="margin-bottom:1rem;color:#666;font-size:0.8125rem">
+      <span class="pill">` + html.EscapeString(buildVersion) + `</span>
+      <span style="color:#555">built ` + html.EscapeString(buildTimestamp) + `</span>
+    </p>
     <p style="margin-bottom:1.5rem">
       <a href="/editor" style="color:#00aaff">&rarr; Open Level Editor</a>
       &nbsp;·&nbsp;
