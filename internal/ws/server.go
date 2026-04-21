@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -12,6 +14,7 @@ import (
 	"space-invaders-coop/backend-go/internal/auth"
 	"space-invaders-coop/backend-go/internal/game"
 	"space-invaders-coop/backend-go/internal/match"
+	"space-invaders-coop/backend-go/internal/stats"
 	"space-invaders-coop/backend-go/internal/types"
 )
 
@@ -50,9 +53,11 @@ func (s *Server) HandleConnection(w http.ResponseWriter, r *http.Request) {
 	matchID := u.Get("matchId")
 	playerID := u.Get("playerId")
 	mode := u.Get("mode")
+	platform := u.Get("platform")
 	if mode != "solo" && mode != "coop" {
 		mode = "coop"
 	}
+	clientIP := clientIPFromRequest(r)
 
 	fmt.Printf("[WS] New connection: token=%s..., authToken=%s, matchId=%s, playerId=%s, mode=%s\n",
 		trunc(token, 20), boolLabel(authToken != "", "yes", "no"), matchID, playerID, mode)
@@ -67,6 +72,20 @@ func (s *Server) HandleConnection(w http.ResponseWriter, r *http.Request) {
 		s.Hub.Send(conn, types.ErrorMessage{Type: "ERROR", Reason: "Cannot join match (full or limit reached)"})
 		time.Sleep(200 * time.Millisecond)
 		return
+	}
+
+	match.SetMetadataIfEmpty(matchID, types.MatchMetadata{
+		UserAgent: r.Header.Get("User-Agent"),
+		Platform:  platform,
+		Locale:    firstLocale(r.Header.Get("Accept-Language")),
+		IPHash:    stats.HashIP(clientIP),
+	})
+	if clientIP != "" {
+		go func(mid, ip string) {
+			if country := stats.LookupCountry(context.Background(), ip); country != "" {
+				match.SetMatchCountry(mid, country)
+			}
+		}(matchID, clientIP)
 	}
 
 	m := match.GetMatch(matchID)
@@ -173,4 +192,39 @@ func boolLabel(b bool, yes, no string) string {
 		return yes
 	}
 	return no
+}
+
+// clientIPFromRequest prefers Fly's Fly-Client-IP header (set by the
+// Fly.io edge proxy), falling back to X-Forwarded-For then RemoteAddr.
+func clientIPFromRequest(r *http.Request) string {
+	if v := r.Header.Get("Fly-Client-IP"); v != "" {
+		return v
+	}
+	if v := r.Header.Get("X-Forwarded-For"); v != "" {
+		if i := strings.IndexByte(v, ','); i > 0 {
+			return strings.TrimSpace(v[:i])
+		}
+		return strings.TrimSpace(v)
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
+}
+
+// firstLocale parses an Accept-Language header and returns the primary
+// language tag (e.g. "en-US" from "en-US,en;q=0.9,fr;q=0.8"). Returns ""
+// if the header is absent or malformed.
+func firstLocale(header string) string {
+	if header == "" {
+		return ""
+	}
+	if i := strings.IndexByte(header, ','); i > 0 {
+		header = header[:i]
+	}
+	if i := strings.IndexByte(header, ';'); i > 0 {
+		header = header[:i]
+	}
+	return strings.TrimSpace(header)
 }

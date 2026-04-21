@@ -43,6 +43,15 @@ func StartLoop(b Broadcaster) {
 				state := GetState(m.MatchID)
 				if state != nil {
 					b.BroadcastToMatch(m.MatchID, types.StateMessage{Type: "STATE", State: *state})
+					if state.GameOver && match.MarkPersisted(m.MatchID) {
+						outcome := "defeat"
+						if state.Victory {
+							outcome = "victory"
+						}
+						if snap := match.Snapshot(m.MatchID, outcome); snap != nil {
+							match.FireFinalizer(snap)
+						}
+					}
 				}
 			}
 		}

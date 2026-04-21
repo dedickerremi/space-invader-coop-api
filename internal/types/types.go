@@ -98,6 +98,43 @@ type Boss struct {
 	SummonTimer   int `json:"-"` // ticks until the next escort summon (warden)
 }
 
+// MatchMetadata holds the client-context fields captured at the first
+// WebSocket handshake of a match. Used for analytics in match_summaries;
+// never sent to the client.
+type MatchMetadata struct {
+	UserAgent string
+	Platform  string
+	Locale    string
+	IPHash    string
+	Country   string // ISO 3166-1 alpha-2, or "" if lookup failed/skipped
+}
+
+// ParticipantSnapshot is one player's end-of-match stats, used when
+// writing to match_participants. UserID == "" for guests.
+type ParticipantSnapshot struct {
+	UserID      string
+	DisplayName string
+	Points      int
+	Kills       int
+	Deaths      int
+	BestStreak  int
+}
+
+// MatchSnapshot is everything the persister needs to write a completed
+// match to the database. Built under the match lock by match.Snapshot.
+type MatchSnapshot struct {
+	MatchID      string
+	Mode         string
+	Outcome      string // "victory" | "defeat" | "abandoned"
+	StartedAt    int64  // ms
+	EndedAt      int64  // ms
+	LevelName    string
+	WaveReached  int
+	BossesKilled []string
+	Metadata     MatchMetadata
+	Participants []ParticipantSnapshot
+}
+
 // GameState is the full game state for a match.
 type GameState struct {
 	Players           []Player          `json:"players"`
@@ -110,6 +147,8 @@ type GameState struct {
 	Lives             int               `json:"lives"`
 	Points            map[string]int    `json:"points"`  // playerId -> points
 	Kills             map[string]int    `json:"kills"`   // playerId -> kills
+	Deaths            map[string]int    `json:"-"`       // playerId -> deaths (for match summary)
+	BestStreaks       map[string]int    `json:"-"`       // playerId -> max streak this match
 	LevelName         string            `json:"levelName"`
 	WaveNumber        int               `json:"waveNumber"`
 	WaveName          string            `json:"waveName"`
@@ -124,10 +163,11 @@ type GameState struct {
 	Boss              *Boss             `json:"boss,omitempty"`
 
 	// Internal wave tracking (not sent to client)
-	WaveTick      int  `json:"-"` // ticks since current wave started
-	WaveCleared   bool `json:"-"` // all enemies from current wave are dead/gone
-	WaveCooldown  int  `json:"-"` // ticks to wait before starting next wave
-	BossDefeated  bool `json:"-"` // true once the current level's boss has been killed
+	WaveTick      int      `json:"-"` // ticks since current wave started
+	WaveCleared   bool     `json:"-"` // all enemies from current wave are dead/gone
+	WaveCooldown  int      `json:"-"` // ticks to wait before starting next wave
+	BossDefeated  bool     `json:"-"` // true once the current level's boss has been killed
+	BossesKilled  []string `json:"-"` // boss kinds defeated this match, for stats
 }
 
 // Match holds match metadata and game state.
@@ -140,6 +180,14 @@ type Match struct {
 	State     GameState
 	CreatedAt int64
 	Mode      string // "solo" or "coop"
+
+	// Client metadata captured from the first WS handshake. Snapshot
+	// fields — never mutated after the first fill.
+	Metadata MatchMetadata
+
+	// Persisted becomes true once a row has been written to match_summaries
+	// for this match, so we don't double-write on game-over + disconnect.
+	Persisted bool
 }
 
 // --- Client messages (inputs) ---

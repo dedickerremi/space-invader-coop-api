@@ -637,6 +637,8 @@ func onBossKilled(s *types.GameState, killerID string) {
 		})
 	}
 
+	s.BossesKilled = append(s.BossesKilled, s.Boss.Kind)
+
 	s.Boss = nil
 	s.EnemyBullets = s.EnemyBullets[:0]
 	s.BossDefeated = true

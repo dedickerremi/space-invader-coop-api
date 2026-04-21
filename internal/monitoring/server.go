@@ -10,7 +10,6 @@ import (
 	"strconv"
 
 	"space-invaders-coop/backend-go/internal/db"
-	"space-invaders-coop/backend-go/internal/stats"
 	"space-invaders-coop/backend-go/internal/ws"
 )
 
@@ -56,6 +55,7 @@ func (s *Server) Run() {
 	mux.HandleFunc("/editor", BasicAuth(s.HandleEditor))
 	mux.HandleFunc("/users", BasicAuth(s.HandleUsersList))
 	mux.HandleFunc("/users/", BasicAuth(s.HandleUserDetail))
+	mux.HandleFunc("/matches", BasicAuth(s.HandleMatchesList))
 	mux.HandleFunc("/", BasicAuth(s.HandleDashboard))
 	addr := ":" + strconv.Itoa(s.port)
 	fmt.Printf("[MONITORING] Dashboard available at http://localhost%s\n", addr)
@@ -64,7 +64,7 @@ func (s *Server) Run() {
 
 // HandleAPIStats serves /api/stats JSON (exported for single-port mode).
 func (s *Server) HandleAPIStats(w http.ResponseWriter, r *http.Request) {
-	st := stats.GetServerStats(s.hub)
+	st := GetServerStats(s.hub)
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(st)
 }
@@ -75,7 +75,7 @@ func (s *Server) HandleDashboard(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	st := stats.GetServerStats(s.hub)
+	st := GetServerStats(s.hub)
 	health := db.Health(r.Context())
 	counts, _ := db.GetCounts(r.Context())
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -122,7 +122,7 @@ func dbStatusBadge(h db.HealthStatus) (label, color string) {
 	}
 }
 
-func dashboardHTML(st stats.ServerStats, health db.HealthStatus, counts db.Counts) string {
+func dashboardHTML(st ServerStats, health db.HealthStatus, counts db.Counts) string {
 	tableRows := ""
 	for _, m := range st.Matches {
 		status := "Waiting"
@@ -184,6 +184,8 @@ func dashboardHTML(st stats.ServerStats, health db.HealthStatus, counts db.Count
       <a href="/editor" style="color:#00aaff">&rarr; Open Level Editor</a>
       &nbsp;·&nbsp;
       <a href="/users" style="color:#00aaff">&rarr; Browse Users</a>
+      &nbsp;·&nbsp;
+      <a href="/matches" style="color:#00aaff">&rarr; Match History</a>
     </p>
     <div class="stats-grid">
       <div class="stat-card"><h2>Active Matches</h2><div class="value">` + strconv.Itoa(st.ActiveMatches) + ` / ` + strconv.Itoa(st.MaxMatches) + `</div></div>
