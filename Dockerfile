@@ -6,7 +6,12 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -o /app/space-invaders-backend .
+
+ARG GIT_SHA=dev
+ARG BUILD_TIME=unknown
+RUN CGO_ENABLED=0 GOOS=linux go build \
+      -ldflags "-X main.Version=${GIT_SHA} -X main.BuildTime=${BUILD_TIME}" \
+      -o /app/space-invaders-backend .
 
 # Run stage
 FROM alpine:3.19

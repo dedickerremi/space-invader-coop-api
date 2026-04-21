@@ -19,6 +19,15 @@ import (
 	"space-invaders-coop/backend-go/internal/ws"
 )
 
+// Version / BuildTime are injected at build time via -ldflags "-X
+// main.Version=<git sha> -X main.BuildTime=<iso8601>". See deploy.sh.
+// The defaults keep /api/version honest when the binary was built
+// without ldflags (local `go run`, tests).
+var (
+	Version   = "dev"
+	BuildTime = "unknown"
+)
+
 func main() {
 	port := getEnvInt("PORT", 0)
 	wsPort := getEnvInt("WS_PORT", 3001)
@@ -26,11 +35,13 @@ func main() {
 
 	fmt.Println("=================================")
 	fmt.Println(" Space Invaders Coop - Backend (Go)")
+	fmt.Printf(" Version %s (built %s)\n", Version, BuildTime)
 	fmt.Println("=================================")
 
 	hub := ws.NewHub()
 	wsServer := ws.NewServer(hub)
 	mon := monitoring.NewServer(hub, monitoringPort)
+	monitoring.SetBuildInfo(Version, BuildTime)
 
 	ctx := context.Background()
 	if err := db.Init(ctx); err != nil {
@@ -52,6 +63,15 @@ func main() {
 
 	// Start game loop in background (broadcasts state via hub)
 	go game.StartLoop(hub)
+
+	handleVersion := func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"commit":    Version,
+			"buildTime": BuildTime,
+		})
+	}
 
 	handleGameMeta := func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -82,6 +102,7 @@ func main() {
 	if port > 0 {
 		// Production: single PORT (Fly, Railway, Koyeb, etc.)
 		mux := http.NewServeMux()
+		mux.HandleFunc("/api/version", handleVersion)
 		mux.HandleFunc("/api/game-meta", handleGameMeta)
 		mux.HandleFunc("/api/stats", monitoring.BasicAuth(mon.HandleAPIStats))
 		mux.HandleFunc("/api/db-status", monitoring.BasicAuth(mon.HandleAPIDBStatus))
@@ -112,6 +133,7 @@ func main() {
 	}
 
 	// Development: two servers (WS on WS_PORT, monitoring on MONITORING_PORT)
+	http.HandleFunc("/api/version", handleVersion)
 	http.HandleFunc("/api/game-meta", handleGameMeta)
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		wsServer.HandleConnection(w, r)
