@@ -27,6 +27,13 @@ func FinalizeMatch(snap *types.MatchSnapshot) {
 	if snap == nil {
 		return
 	}
+	// Loadgen self-identifies via platform=loadgen in the WS query string;
+	// those matches are stress-test noise and would otherwise pile up as
+	// "abandoned" rows in match_summaries.
+	if snap.Metadata.Platform == "loadgen" {
+		fmt.Printf("[STATS] Skipping persistence for loadgen match %s\n", snap.MatchID)
+		return
+	}
 	pool := db.Pool()
 	if pool == nil {
 		return
