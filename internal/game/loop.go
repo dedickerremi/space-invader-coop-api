@@ -38,11 +38,15 @@ func StartLoop(b Broadcaster) {
 			fmt.Println("[GAME] Game loop stopped")
 			return
 		case <-ticker.C:
+			tickStart := time.Now()
+			var broadcastDur time.Duration
 			for _, m := range match.GetAllMatches() {
 				Tick(m.MatchID)
 				state := GetState(m.MatchID)
 				if state != nil {
+					bcStart := time.Now()
 					b.BroadcastToMatch(m.MatchID, types.StateMessage{Type: "STATE", State: *state})
+					broadcastDur += time.Since(bcStart)
 					if state.GameOver && match.MarkPersisted(m.MatchID) {
 						outcome := "defeat"
 						if state.Victory {
@@ -54,6 +58,8 @@ func StartLoop(b Broadcaster) {
 					}
 				}
 			}
+			RecordTick(time.Since(tickStart))
+			RecordBroadcast(broadcastDur)
 		}
 	}
 }

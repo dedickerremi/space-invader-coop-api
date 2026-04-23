@@ -10,6 +10,7 @@ import (
 	"strconv"
 
 	"space-invaders-coop/backend-go/internal/db"
+	"space-invaders-coop/backend-go/internal/game"
 	"space-invaders-coop/backend-go/internal/ws"
 )
 
@@ -130,6 +131,54 @@ func formatCount(n *int64) string {
 	return strconv.FormatInt(*n, 10)
 }
 
+// formatMicros renders a microsecond count as a human-friendly string.
+// Sub-millisecond values stay in µs so the dashboard can show p50 jitter
+// without rounding to 0; anything above shows in ms with two decimals to
+// keep the tick budget (~33 ms) easy to eyeball.
+func formatMicros(us int64) string {
+	if us < 1000 {
+		return fmt.Sprintf("%d µs", us)
+	}
+	return fmt.Sprintf("%.2f ms", float64(us)/1000.0)
+}
+
+func loopMetricsHTML(m game.LoopMetrics) string {
+	budget := m.TickBudgetMicros
+	row := func(label string, s game.DurationStats) string {
+		over := s.P99Micros > budget && s.Count > 0
+		valColor := "#00ff88"
+		if over {
+			valColor = "#ff4444"
+		}
+		warn := ""
+		if over {
+			warn = ` <span style="color:#ff4444;font-size:0.7rem">⚠ over budget</span>`
+		}
+		return fmt.Sprintf(`<tr>
+  <td style="color:#888">%s</td>
+  <td>%s</td>
+  <td>%s</td>
+  <td style="color:%s">%s%s</td>
+  <td>%s</td>
+  <td style="color:#666">%d</td>
+</tr>`,
+			html.EscapeString(label),
+			formatMicros(s.P50Micros),
+			formatMicros(s.P95Micros),
+			valColor, formatMicros(s.P99Micros), warn,
+			formatMicros(s.MaxMicros),
+			s.Count,
+		)
+	}
+	return `<div class="matches-table" style="margin-bottom:2rem">
+  <h2>Game Loop <span style="color:#666;font-size:0.75rem;font-weight:normal">tick budget ` + formatMicros(budget) + ` @ 30 Hz</span></h2>
+  <table>
+    <thead><tr><th>Stage</th><th>p50</th><th>p95</th><th>p99</th><th>max</th><th>samples</th></tr></thead>
+    <tbody>` + row("Tick", m.Tick) + row("Broadcast", m.Broadcast) + `</tbody>
+  </table>
+</div>`
+}
+
 func dbStatusBadge(h db.HealthStatus) (label, color string) {
 	switch {
 	case !h.Configured:
@@ -224,6 +273,7 @@ func dashboardHTML(st ServerStats, health db.HealthStatus, counts db.Counts) str
       <div class="stat-card"><h2>Games (DB)</h2><div class="value">` + formatCount(counts.Games) + `</div></div>
       <div class="stat-card"><h2>Users (DB)</h2><div class="value">` + formatCount(counts.Users) + `</div></div>
     </div>
+    ` + loopMetricsHTML(st.Loop) + `
     <div class="matches-table">
       <h2>Active Matches</h2>
       <table><thead><tr><th>Match ID</th><th>Players</th><th>Status</th><th>Age</th></tr></thead><tbody>` +
