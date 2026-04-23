@@ -142,6 +142,27 @@ func formatMicros(us int64) string {
 	return fmt.Sprintf("%.2f ms", float64(us)/1000.0)
 }
 
+// loopHealth maps tick p99 vs the tick budget to a coarse label. p99
+// is the right signal: avg hides spikes, max is dominated by GC noise.
+// Bands are tuned so "Good" means there's enough headroom that adding
+// another match or two won't tip us over.
+func loopHealth(p99, budget int64, samples uint64) (label, color string, pct int) {
+	if budget <= 0 || samples == 0 {
+		return "No data", "#888", 0
+	}
+	pct = int(p99 * 100 / budget)
+	switch {
+	case pct < 30:
+		return "Good", "#00ff88", pct
+	case pct < 60:
+		return "OK", "#ffd84d", pct
+	case pct < 90:
+		return "Warning", "#ff9500", pct
+	default:
+		return "Critical", "#ff4444", pct
+	}
+}
+
 func loopMetricsHTML(m game.LoopMetrics) string {
 	budget := m.TickBudgetMicros
 	row := func(label string, s game.DurationStats) string {
@@ -170,8 +191,13 @@ func loopMetricsHTML(m game.LoopMetrics) string {
 			s.Count,
 		)
 	}
+	hLabel, hColor, hPct := loopHealth(m.Tick.P99Micros, budget, m.Tick.Count)
+	healthBadge := fmt.Sprintf(
+		`<span style="display:inline-block;background:%s;color:#000;padding:0.2rem 0.7rem;border-radius:999px;font-size:0.75rem;font-weight:bold;margin-left:0.75rem;vertical-align:middle">%s</span><span style="color:#666;font-size:0.75rem;font-weight:normal;margin-left:0.5rem;vertical-align:middle">%d%% of budget</span>`,
+		hColor, html.EscapeString(hLabel), hPct,
+	)
 	return `<div class="matches-table" style="margin-bottom:2rem">
-  <h2>Game Loop <span style="color:#666;font-size:0.75rem;font-weight:normal">tick budget ` + formatMicros(budget) + ` @ 30 Hz</span></h2>
+  <h2>Game Loop` + healthBadge + `<span style="color:#666;font-size:0.75rem;font-weight:normal;float:right">budget ` + formatMicros(budget) + ` @ 30 Hz</span></h2>
   <table>
     <thead><tr><th>Stage</th><th>p50</th><th>p95</th><th>p99</th><th>max</th><th>samples</th></tr></thead>
     <tbody>` + row("Tick", m.Tick) + row("Broadcast", m.Broadcast) + `</tbody>
