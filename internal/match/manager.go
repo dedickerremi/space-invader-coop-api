@@ -8,7 +8,7 @@ import (
 	"space-invaders-coop/backend-go/internal/types"
 )
 
-const maxMatches = 10
+const maxMatches = 50
 
 var (
 	mu           sync.RWMutex

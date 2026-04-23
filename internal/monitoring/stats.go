@@ -8,7 +8,7 @@ import (
 	"space-invaders-coop/backend-go/internal/ws"
 )
 
-const maxMatches = 10
+const maxMatches = 50
 
 // MatchInfo is one match's live stats for the dashboard.
 type MatchInfo struct {
