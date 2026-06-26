@@ -2,6 +2,7 @@ package ws
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -14,6 +15,7 @@ import (
 	"space-invaders-coop/backend-go/internal/auth"
 	"space-invaders-coop/backend-go/internal/game"
 	"space-invaders-coop/backend-go/internal/match"
+	"space-invaders-coop/backend-go/internal/matchmaking"
 	"space-invaders-coop/backend-go/internal/stats"
 	"space-invaders-coop/backend-go/internal/types"
 )
@@ -61,6 +63,69 @@ func (s *Server) HandleConnection(w http.ResponseWriter, r *http.Request) {
 
 	fmt.Printf("[WS] New connection: token=%s..., authToken=%s, matchId=%s, playerId=%s, mode=%s\n",
 		trunc(token, 20), boolLabel(authToken != "", "yes", "no"), matchID, playerID, mode)
+
+	// Matchmaking queue: client sends matchId=queue (or empty) in coop mode.
+	if mode == "coop" && (matchID == "" || matchID == "queue") {
+		if token == "" || playerID == "" {
+			s.Hub.Send(conn, types.ErrorMessage{Type: "ERROR", Reason: "Missing token or playerId"})
+			time.Sleep(200 * time.Millisecond)
+			return
+		}
+
+		genMatchID, isWaiting, notify := matchmaking.Enqueue(playerID, conn)
+		if isWaiting {
+			s.Hub.Send(conn, types.QueuedMessage{Type: "QUEUED", Position: 1})
+			fmt.Printf("[QUEUE] Player %s waiting for opponent\n", playerID)
+
+			queueDeadline := time.Now().Add(30 * time.Second)
+		waitLoop:
+			for time.Now().Before(queueDeadline) {
+				conn.SetReadDeadline(time.Now().Add(250 * time.Millisecond))
+				_, _, readErr := conn.ReadMessage()
+
+				// Check if match was found (after read, regardless of error).
+				select {
+				case mid := <-notify:
+					genMatchID = mid
+					conn.SetReadDeadline(time.Time{})
+					break waitLoop
+				default:
+				}
+
+				if readErr != nil {
+					var netErr net.Error
+					if errors.As(readErr, &netErr) && netErr.Timeout() {
+						continue
+					}
+					// Real disconnect.
+					fmt.Printf("[QUEUE] Player %s disconnected while waiting\n", playerID)
+					matchmaking.Dequeue(playerID)
+					return
+				}
+			}
+
+			// One last check in case the match arrived right as the deadline expired.
+			if genMatchID == "" {
+				select {
+				case mid := <-notify:
+					genMatchID = mid
+					conn.SetReadDeadline(time.Time{})
+				default:
+				}
+			}
+
+			if genMatchID == "" {
+				fmt.Printf("[QUEUE] Player %s timed out waiting for opponent\n", playerID)
+				s.Hub.Send(conn, types.QueueTimeoutMessage{Type: "QUEUE_TIMEOUT", Reason: "No opponent found"})
+				matchmaking.Dequeue(playerID)
+				return
+			}
+		}
+
+		fmt.Printf("[QUEUE] Player %s matched → %s\n", playerID, genMatchID)
+		s.Hub.Send(conn, types.MatchFoundMessage{Type: "MATCH_FOUND", MatchID: genMatchID})
+		matchID = genMatchID
+	}
 
 	if token == "" || matchID == "" || playerID == "" {
 		s.Hub.Send(conn, types.ErrorMessage{Type: "ERROR", Reason: "Missing token, matchId or playerId"})

@@ -82,6 +82,15 @@ func (s *Server) Run() {
 	_ = http.ListenAndServe(addr, mux)
 }
 
+// HandleAPIOnline serves /api/online JSON (public, no auth).
+func (s *Server) HandleAPIOnline(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	_ = json.NewEncoder(w).Encode(map[string]int{
+		"playersOnline": s.hub.TotalPlayerCount(),
+	})
+}
+
 // HandleAPIStats serves /api/stats JSON (exported for single-port mode).
 func (s *Server) HandleAPIStats(w http.ResponseWriter, r *http.Request) {
 	st := GetServerStats(s.hub)
@@ -289,6 +298,7 @@ func dashboardHTML(st ServerStats, health db.HealthStatus, counts db.Counts) str
     <div class="stats-grid">
       <div class="stat-card"><h2>Active Matches</h2><div class="value">` + strconv.Itoa(st.ActiveMatches) + ` / ` + strconv.Itoa(st.MaxMatches) + `</div></div>
       <div class="stat-card"><h2>Total Players</h2><div class="value">` + strconv.Itoa(st.TotalPlayers) + `</div></div>
+      <div class="stat-card"><h2>In Queue</h2><div class="value">` + strconv.Itoa(st.QueueSize) + ` / 1</div></div>
       <div class="stat-card"><h2>Database</h2><div class="value" style="color:` + func() string { _, c := dbStatusBadge(health); return c }() + `;font-size:1.25rem">` + func() string { l, _ := dbStatusBadge(health); return html.EscapeString(l) }() + `</div>` + func() string {
 			if health.Error != "" {
 				return `<div style="color:#ff8888;font-size:0.75rem;margin-top:0.5rem;word-break:break-word">` + html.EscapeString(health.Error) + `</div>`

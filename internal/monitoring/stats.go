@@ -5,6 +5,7 @@ import (
 
 	"space-invaders-coop/backend-go/internal/game"
 	"space-invaders-coop/backend-go/internal/match"
+	"space-invaders-coop/backend-go/internal/matchmaking"
 	"space-invaders-coop/backend-go/internal/ws"
 )
 
@@ -26,6 +27,7 @@ type ServerStats struct {
 	ActiveMatches int              `json:"activeMatches"`
 	MaxMatches    int              `json:"maxMatches"`
 	TotalPlayers  int              `json:"totalPlayers"`
+	QueueSize     int              `json:"queueSize"`
 	Matches       []MatchInfo      `json:"matches"`
 	Loop          game.LoopMetrics `json:"loop"`
 }
@@ -54,6 +56,7 @@ func GetServerStats(hub *ws.Hub) ServerStats {
 		ActiveMatches: match.GetActiveMatchCount(),
 		MaxMatches:    maxMatches,
 		TotalPlayers:  totalPlayers,
+		QueueSize:     matchmaking.QueueSize(),
 		Matches:       matches,
 		Loop:          game.GetMetrics(),
 	}

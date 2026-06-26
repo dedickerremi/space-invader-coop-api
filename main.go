@@ -104,6 +104,7 @@ func main() {
 		mux := http.NewServeMux()
 		mux.HandleFunc("/api/version", handleVersion)
 		mux.HandleFunc("/api/game-meta", handleGameMeta)
+		mux.HandleFunc("/api/online", mon.HandleAPIOnline)
 		mux.HandleFunc("/api/stats", monitoring.BasicAuth(mon.HandleAPIStats))
 		mux.HandleFunc("/api/db-status", monitoring.BasicAuth(mon.HandleAPIDBStatus))
 		mux.HandleFunc("/api/levels", monitoring.BasicAuth(monitoring.HandleLevelsList))
@@ -135,6 +136,7 @@ func main() {
 	// Development: two servers (WS on WS_PORT, monitoring on MONITORING_PORT)
 	http.HandleFunc("/api/version", handleVersion)
 	http.HandleFunc("/api/game-meta", handleGameMeta)
+	http.HandleFunc("/api/online", mon.HandleAPIOnline)
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		wsServer.HandleConnection(w, r)
 	})
