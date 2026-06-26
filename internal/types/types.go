@@ -233,3 +233,21 @@ type MatchEndedMessage struct {
 	Type   string `json:"type"`
 	Reason string `json:"reason"`
 }
+
+// QueuedMessage is sent to a player who is waiting for an opponent.
+type QueuedMessage struct {
+	Type     string `json:"type"`     // "QUEUED"
+	Position int    `json:"position"` // always 1 for now
+}
+
+// MatchFoundMessage is sent when a waiting player is paired with an opponent.
+type MatchFoundMessage struct {
+	Type    string `json:"type"`    // "MATCH_FOUND"
+	MatchID string `json:"matchId"`
+}
+
+// QueueTimeoutMessage is sent when no opponent is found within the timeout.
+type QueueTimeoutMessage struct {
+	Type   string `json:"type"`   // "QUEUE_TIMEOUT"
+	Reason string `json:"reason"`
+}

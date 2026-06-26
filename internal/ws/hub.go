@@ -159,6 +159,17 @@ func (h *Hub) GetConnectedCount(matchID string) int {
 	return len(h.clients[matchID])
 }
 
+// TotalPlayerCount returns the total number of connected players across all matches.
+func (h *Hub) TotalPlayerCount() int {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	total := 0
+	for _, m := range h.clients {
+		total += len(m)
+	}
+	return total
+}
+
 // HasPlayer returns true if the given player is registered in the match.
 func (h *Hub) HasPlayer(matchID, playerID string) bool {
 	h.mu.RLock()
