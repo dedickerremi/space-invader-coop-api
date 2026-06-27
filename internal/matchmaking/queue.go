@@ -32,15 +32,7 @@ func Enqueue(playerID string, conn *websocket.Conn) (matchID string, isWaiting b
 		return "", true, ch
 	}
 
-	// Ping the waiting conn to see if it's still alive.
-	if err := waiting.conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(200*time.Millisecond)); err != nil {
-		// Stale connection: replace with the new player.
-		ch := make(chan string, 1)
-		waiting = &waitingPlayer{playerID: playerID, conn: conn, matched: ch}
-		return "", true, ch
-	}
-
-	// Alive: pair them.
+	// Pair them.
 	mid := fmt.Sprintf("q-%d", time.Now().UnixNano())
 	waiting.matched <- mid
 	waiting = nil
