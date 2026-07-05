@@ -2,7 +2,7 @@ package ws
 
 import (
 	"context"
-	"errors"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net"
@@ -64,6 +64,32 @@ func (s *Server) HandleConnection(w http.ResponseWriter, r *http.Request) {
 	fmt.Printf("[WS] New connection: token=%s..., authToken=%s, matchId=%s, playerId=%s, mode=%s\n",
 		trunc(token, 20), boolLabel(authToken != "", "yes", "no"), matchID, playerID, mode)
 
+	// Single reader goroutine for the whole connection lifetime. The queue
+	// phase must select on queue events while still noticing disconnects —
+	// but polling with SetReadDeadline poisons the connection: a gorilla
+	// read timeout is permanent, and repeated reads on the failed connection
+	// panic. So all reads go through this pump instead.
+	handlerDone := make(chan struct{})
+	defer close(handlerDone)
+	type readResult struct {
+		raw []byte
+		err error
+	}
+	reads := make(chan readResult, 8)
+	go func() {
+		for {
+			_, raw, err := conn.ReadMessage()
+			select {
+			case reads <- readResult{raw: raw, err: err}:
+			case <-handlerDone:
+				return
+			}
+			if err != nil {
+				return
+			}
+		}
+	}()
+
 	// Matchmaking queue: client sends matchId=queue (or empty) in coop mode.
 	if mode == "coop" && (matchID == "" || matchID == "queue") {
 		if token == "" || playerID == "" {
@@ -77,49 +103,46 @@ func (s *Server) HandleConnection(w http.ResponseWriter, r *http.Request) {
 			s.Hub.Send(conn, types.QueuedMessage{Type: "QUEUED", Position: 1})
 			fmt.Printf("[QUEUE] Player %s waiting for opponent\n", playerID)
 
-			queueDeadline := time.Now().Add(30 * time.Second)
+			queueTimer := time.NewTimer(30 * time.Second)
 		waitLoop:
-			for time.Now().Before(queueDeadline) {
-				conn.SetReadDeadline(time.Now().Add(250 * time.Millisecond))
-				_, _, readErr := conn.ReadMessage()
-
-				// Check if match was found (after read, regardless of error).
+			for {
 				select {
 				case mid := <-notify:
 					genMatchID = mid
-					conn.SetReadDeadline(time.Time{})
 					break waitLoop
-				default:
-				}
 
-				if readErr != nil {
-					var netErr net.Error
-					if errors.As(readErr, &netErr) && netErr.Timeout() {
-						continue
+				case r := <-reads:
+					if r.err != nil {
+						queueTimer.Stop()
+						fmt.Printf("[QUEUE] Player %s disconnected while waiting\n", playerID)
+						matchmaking.Dequeue(playerID)
+						return
 					}
-					// Real disconnect.
-					fmt.Printf("[QUEUE] Player %s disconnected while waiting\n", playerID)
-					matchmaking.Dequeue(playerID)
+					// Answer PINGs while queued so the client's connection
+					// health checks keep passing; ignore everything else.
+					var msg types.ClientMessage
+					if json.Unmarshal(r.raw, &msg) == nil && msg.Type == "PING" && msg.Timestamp != nil {
+						s.Hub.Send(conn, types.PongMessage{Type: "PONG", Timestamp: *msg.Timestamp})
+					}
+
+				case <-queueTimer.C:
+					// Dequeue can lose a race with Enqueue pairing us: if it
+					// returns false we were already matched and the notify is
+					// guaranteed to be buffered (sent under the queue lock).
+					if !matchmaking.Dequeue(playerID) {
+						select {
+						case mid := <-notify:
+							genMatchID = mid
+							break waitLoop
+						default:
+						}
+					}
+					fmt.Printf("[QUEUE] Player %s timed out waiting for opponent\n", playerID)
+					s.Hub.Send(conn, types.QueueTimeoutMessage{Type: "QUEUE_TIMEOUT", Reason: "No opponent found"})
 					return
 				}
 			}
-
-			// One last check in case the match arrived right as the deadline expired.
-			if genMatchID == "" {
-				select {
-				case mid := <-notify:
-					genMatchID = mid
-					conn.SetReadDeadline(time.Time{})
-				default:
-				}
-			}
-
-			if genMatchID == "" {
-				fmt.Printf("[QUEUE] Player %s timed out waiting for opponent\n", playerID)
-				s.Hub.Send(conn, types.QueueTimeoutMessage{Type: "QUEUE_TIMEOUT", Reason: "No opponent found"})
-				matchmaking.Dequeue(playerID)
-				return
-			}
+			queueTimer.Stop()
 		}
 
 		fmt.Printf("[QUEUE] Player %s matched → %s\n", playerID, genMatchID)
@@ -188,14 +211,14 @@ func (s *Server) HandleConnection(w http.ResponseWriter, r *http.Request) {
 	// Use SendSafe so the WELCOME write doesn't race with game loop broadcasts
 	s.Hub.SendSafe(matchID, playerID, types.WelcomeMessage{Type: "WELCOME", PlayerID: playerID, MatchID: matchID, Mode: mode})
 
-	// Read loop
+	// Read loop (messages come from the reader pump started above)
 	for {
-		_, raw, err := conn.ReadMessage()
-		if err != nil {
-			fmt.Printf("[WS] Read error for %s in %s: %v\n", playerID, matchID, err)
+		r := <-reads
+		if r.err != nil {
+			fmt.Printf("[WS] Read error for %s in %s: %v\n", playerID, matchID, r.err)
 			break
 		}
-		result := HandleMessage(matchID, playerID, raw)
+		result := HandleMessage(matchID, playerID, r.raw)
 		switch result.Action {
 		case "exit":
 			s.Hub.BroadcastToMatch(matchID, types.MatchEndedMessage{Type: "MATCH_ENDED", Reason: "Player left the game"})
