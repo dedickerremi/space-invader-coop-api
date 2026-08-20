@@ -76,6 +76,8 @@ func (s *Server) Run() {
 	mux.HandleFunc("/users", BasicAuth(s.HandleUsersList))
 	mux.HandleFunc("/users/", BasicAuth(s.HandleUserDetail))
 	mux.HandleFunc("/matches", BasicAuth(s.HandleMatchesList))
+	mux.HandleFunc("/queue", BasicAuth(s.HandleQueue))
+	mux.HandleFunc("/api/queue", BasicAuth(s.HandleAPIQueue))
 	mux.HandleFunc("/", BasicAuth(s.HandleDashboard))
 	addr := ":" + strconv.Itoa(s.port)
 	fmt.Printf("[MONITORING] Dashboard available at http://localhost%s\n", addr)
@@ -294,11 +296,13 @@ func dashboardHTML(st ServerStats, health db.HealthStatus, counts db.Counts) str
       <a href="/users" style="color:#00aaff">&rarr; Browse Users</a>
       &nbsp;·&nbsp;
       <a href="/matches" style="color:#00aaff">&rarr; Match History</a>
+      &nbsp;·&nbsp;
+      <a href="/queue" style="color:#00aaff">&rarr; Matchmaking Queue</a>
     </p>
     <div class="stats-grid">
       <div class="stat-card"><h2>Active Matches</h2><div class="value">` + strconv.Itoa(st.ActiveMatches) + ` / ` + strconv.Itoa(st.MaxMatches) + `</div></div>
       <div class="stat-card"><h2>Total Players</h2><div class="value">` + strconv.Itoa(st.TotalPlayers) + `</div></div>
-      <div class="stat-card"><h2>In Queue</h2><div class="value">` + strconv.Itoa(st.QueueSize) + ` / 1</div></div>
+      <div class="stat-card"><h2>In Queue</h2><div class="value"><a href="/queue" style="color:inherit;text-decoration:none">` + strconv.Itoa(st.QueueSize) + ` / 1</a></div></div>
       <div class="stat-card"><h2>Database</h2><div class="value" style="color:` + func() string { _, c := dbStatusBadge(health); return c }() + `;font-size:1.25rem">` + func() string { l, _ := dbStatusBadge(health); return html.EscapeString(l) }() + `</div>` + func() string {
 			if health.Error != "" {
 				return `<div style="color:#ff8888;font-size:0.75rem;margin-top:0.5rem;word-break:break-word">` + html.EscapeString(health.Error) + `</div>`

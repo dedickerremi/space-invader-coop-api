@@ -267,6 +267,13 @@ func matchesPageShell(title, body string) string {
   form.filters label { color: #888; font-size: 0.75rem; text-transform: uppercase; display: flex; gap: 0.5rem; align-items: center; }
   form.filters select, form.filters input { background: #0a0a0f; color: #e0e0e0; border: 1px solid #333; border-radius: 4px; padding: 0.25rem 0.5rem; font-family: inherit; font-size: 0.875rem; }
   form.filters button { background: #00ff88; color: #000; border: 0; border-radius: 4px; padding: 0.35rem 1rem; font-family: inherit; font-weight: bold; cursor: pointer; text-transform: uppercase; font-size: 0.75rem; }
+  .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 1rem; margin-bottom: 1.5rem; }
+  .stat-card { background: #1a1a24; border: 2px solid #333; border-radius: 8px; padding: 1rem 1.25rem; }
+  .stat-card h2 { color: #888; font-size: 0.75rem; text-transform: uppercase; font-weight: normal; letter-spacing: 0.05em; margin-bottom: 0.35rem; }
+  .stat-card .value { color: #00ff88; font-size: 1.75rem; font-weight: bold; line-height: 1.2; }
+  .stat-card .sub { color: #666; font-size: 0.75rem; margin-top: 0.35rem; line-height: 1.4; }
+  .banner { background: #2a1a10; border: 1px solid #ff9500; border-radius: 6px; padding: 0.75rem 1rem; margin-bottom: 1.5rem; color: #ffc98a; font-size: 0.8125rem; }
+  .banner strong { color: #ffaa00; }
   table { width: 100%; border-collapse: collapse; background: #1a1a24; border: 2px solid #333; border-radius: 8px; overflow: hidden; }
   th, td { padding: 0.75rem 1rem; text-align: left; border-bottom: 1px solid #222; vertical-align: top; font-size: 0.8125rem; }
   th { color: #888; font-size: 0.75rem; text-transform: uppercase; background: #15151d; }

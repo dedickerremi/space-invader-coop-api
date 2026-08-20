@@ -103,7 +103,7 @@ func (s *Server) HandleConnection(w http.ResponseWriter, r *http.Request) {
 			s.Hub.Send(conn, types.QueuedMessage{Type: "QUEUED", Position: 1})
 			fmt.Printf("[QUEUE] Player %s waiting for opponent\n", playerID)
 
-			queueTimer := time.NewTimer(30 * time.Second)
+			queueTimer := time.NewTimer(matchmaking.QueueTimeout)
 		waitLoop:
 			for {
 				select {
@@ -115,7 +115,7 @@ func (s *Server) HandleConnection(w http.ResponseWriter, r *http.Request) {
 					if r.err != nil {
 						queueTimer.Stop()
 						fmt.Printf("[QUEUE] Player %s disconnected while waiting\n", playerID)
-						matchmaking.Dequeue(playerID)
+						matchmaking.Dequeue(playerID, matchmaking.EventDisconnected)
 						return
 					}
 					// Answer PINGs while queued so the client's connection
@@ -129,7 +129,7 @@ func (s *Server) HandleConnection(w http.ResponseWriter, r *http.Request) {
 					// Dequeue can lose a race with Enqueue pairing us: if it
 					// returns false we were already matched and the notify is
 					// guaranteed to be buffered (sent under the queue lock).
-					if !matchmaking.Dequeue(playerID) {
+					if !matchmaking.Dequeue(playerID, matchmaking.EventTimeout) {
 						select {
 						case mid := <-notify:
 							genMatchID = mid

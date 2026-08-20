@@ -114,6 +114,8 @@ func main() {
 		mux.HandleFunc("/users", monitoring.BasicAuth(mon.HandleUsersList))
 		mux.HandleFunc("/users/", monitoring.BasicAuth(mon.HandleUserDetail))
 		mux.HandleFunc("/matches", monitoring.BasicAuth(mon.HandleMatchesList))
+		mux.HandleFunc("/queue", monitoring.BasicAuth(mon.HandleQueue))
+		mux.HandleFunc("/api/queue", monitoring.BasicAuth(mon.HandleAPIQueue))
 		mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 			if r.URL.Path != "/" {
 				http.NotFound(w, r)
