@@ -1,4 +1,9 @@
-# Merge main into production — déclenche un déploiement Fly (branche production)
+# Merge main into production, puis déploie sur Fly avec le SHA gravé dans le
+# binaire (/api/version).
+#
+# Le déploiement vit dans ce workflow plutôt que dans un workflow séparé
+# déclenché par un push sur production : un push effectué avec GITHUB_TOKEN ne
+# déclenche pas d'autres workflows, donc un deploy.yml ne partirait jamais.
 name: Merge main → production
 
 on:
@@ -32,3 +37,21 @@ jobs:
             git checkout -B production origin/main
           fi
           git push origin production
+
+      - name: Set up flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@master
+
+      # Stamps the running commit into the binary via ldflags, the same way
+      # deploy.sh does, so /api/version and the dashboard build pill report
+      # what is actually in production instead of "dev".
+      - name: Deploy to Fly
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          GIT_SHA="$(git rev-parse --short=12 HEAD)"
+          BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo "Deploying ${GIT_SHA} (built ${BUILD_TIME})"
+          flyctl deploy --remote-only \
+            --app space-invaders-coop-backend \
+            --build-arg "GIT_SHA=${GIT_SHA}" \
+            --build-arg "BUILD_TIME=${BUILD_TIME}"
