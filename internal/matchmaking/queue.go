@@ -16,8 +16,19 @@ const QueueTimeout = 30 * time.Second
 type waitingPlayer struct {
 	playerID string
 	conn     *websocket.Conn
-	matched  chan string // receives the generated matchID
+	matched  chan string   // receives the generated matchID
+	cancel   chan struct{} // closed when a newer connection takes this slot
 	since    time.Time
+}
+
+func newWaiter(playerID string, conn *websocket.Conn, now time.Time) *waitingPlayer {
+	return &waitingPlayer{
+		playerID: playerID,
+		conn:     conn,
+		matched:  make(chan string, 1),
+		cancel:   make(chan struct{}),
+		since:    now,
+	}
 }
 
 // mu guards waiting plus all observability state in observe.go.
@@ -28,19 +39,39 @@ var (
 
 // Enqueue adds a player to the queue or pairs them with the waiting player.
 // If isWaiting is true, the caller must receive from the returned notify channel
-// to get the assigned matchID. If isWaiting is false, matchID is ready immediately.
-func Enqueue(playerID string, conn *websocket.Conn) (matchID string, isWaiting bool, notify <-chan string) {
+// to get the assigned matchID, and must abandon the wait if superseded is
+// closed. If isWaiting is false, matchID is ready immediately.
+func Enqueue(playerID string, conn *websocket.Conn) (matchID string, isWaiting bool, notify <-chan string, superseded <-chan struct{}) {
 	mu.Lock()
 	defer mu.Unlock()
 
 	now := time.Now()
 	counters.Arrivals++
 
+	// The same playerID is already holding the slot: two browser tabs sharing
+	// one stored playerId, or a refresh that reconnected before the old socket
+	// was reaped. Pairing them would match the player with themselves — both
+	// connections collapse onto one key in the hub and one entity in game
+	// state, so the match reports 1/2 connected and never starts. Hand the
+	// slot to the newest connection instead and release the old one.
+	if waiting != nil && waiting.playerID == playerID {
+		counters.Superseded++
+		recordLocked(Event{
+			At: now, Kind: EventSuperseded, PlayerID: playerID,
+			WaitedMs: now.Sub(waiting.since).Milliseconds(),
+			Note:     "same playerId re-queued — newest connection takes the slot",
+		})
+		close(waiting.cancel)
+		w := newWaiter(playerID, conn, now)
+		waiting = w
+		return "", true, w.matched, w.cancel
+	}
+
 	if waiting == nil {
-		ch := make(chan string, 1)
-		waiting = &waitingPlayer{playerID: playerID, conn: conn, matched: ch, since: now}
+		w := newWaiter(playerID, conn, now)
+		waiting = w
 		recordLocked(Event{At: now, Kind: EventEnqueued, PlayerID: playerID})
-		return "", true, ch
+		return "", true, w.matched, w.cancel
 	}
 
 	// Pair them.
@@ -58,23 +89,26 @@ func Enqueue(playerID string, conn *websocket.Conn) (matchID string, isWaiting b
 		Note: "paired with " + waiting.playerID,
 	})
 	waiting = nil
-	return mid, false, nil
+	return mid, false, nil, nil
 }
 
-// Dequeue removes a player from the queue if they are the one waiting. reason
-// should be EventTimeout or EventDisconnected so the queue page can tell the
-// two apart.
+// Dequeue removes a player from the queue if their connection is the one
+// holding the slot. reason should be EventTimeout or EventDisconnected so the
+// queue page can tell the two apart.
 //
-// A false return means the player no longer held the slot because Enqueue
-// paired them first — their matchID is already buffered on the notify channel.
-// That race is counted separately so a spike in it stays visible.
-func Dequeue(playerID string, reason EventKind) bool {
+// The conn is matched as well as the playerID: a superseded goroutine must
+// never be able to evict the newer connection that replaced it.
+//
+// A false return means this connection no longer held the slot — either
+// Enqueue paired it first (the matchID is already buffered on notify) or a
+// newer connection took over.
+func Dequeue(playerID string, conn *websocket.Conn, reason EventKind) bool {
 	mu.Lock()
 	defer mu.Unlock()
 
 	now := time.Now()
 
-	if waiting != nil && waiting.playerID == playerID {
+	if waiting != nil && waiting.playerID == playerID && waiting.conn == conn {
 		waited := now.Sub(waiting.since).Milliseconds()
 		waiting = nil
 		switch reason {
@@ -90,7 +124,7 @@ func Dequeue(playerID string, reason EventKind) bool {
 	counters.PairRaces++
 	recordLocked(Event{
 		At: now, Kind: EventPairRace, PlayerID: playerID,
-		Note: string(reason) + " lost the race with pairing — player was already matched",
+		Note: string(reason) + " on a connection that no longer held the slot (already paired, or superseded)",
 	})
 	return false
 }

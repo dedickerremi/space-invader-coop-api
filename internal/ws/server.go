@@ -98,7 +98,7 @@ func (s *Server) HandleConnection(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		genMatchID, isWaiting, notify := matchmaking.Enqueue(playerID, conn)
+		genMatchID, isWaiting, notify, superseded := matchmaking.Enqueue(playerID, conn)
 		if isWaiting {
 			s.Hub.Send(conn, types.QueuedMessage{Type: "QUEUED", Position: 1})
 			fmt.Printf("[QUEUE] Player %s waiting for opponent\n", playerID)
@@ -111,11 +111,24 @@ func (s *Server) HandleConnection(w http.ResponseWriter, r *http.Request) {
 					genMatchID = mid
 					break waitLoop
 
+				case <-superseded:
+					// Another connection re-queued with this same playerID and
+					// took the slot. Give it up rather than let the queue pair
+					// this player with themselves.
+					queueTimer.Stop()
+					fmt.Printf("[QUEUE] Player %s superseded by a newer connection\n", playerID)
+					s.Hub.Send(conn, types.ErrorMessage{
+						Type:   "ERROR",
+						Reason: "Already queued in another tab or window",
+					})
+					time.Sleep(200 * time.Millisecond)
+					return
+
 				case r := <-reads:
 					if r.err != nil {
 						queueTimer.Stop()
 						fmt.Printf("[QUEUE] Player %s disconnected while waiting\n", playerID)
-						matchmaking.Dequeue(playerID, matchmaking.EventDisconnected)
+						matchmaking.Dequeue(playerID, conn, matchmaking.EventDisconnected)
 						return
 					}
 					// Answer PINGs while queued so the client's connection
@@ -129,7 +142,7 @@ func (s *Server) HandleConnection(w http.ResponseWriter, r *http.Request) {
 					// Dequeue can lose a race with Enqueue pairing us: if it
 					// returns false we were already matched and the notify is
 					// guaranteed to be buffered (sent under the queue lock).
-					if !matchmaking.Dequeue(playerID, matchmaking.EventTimeout) {
+					if !matchmaking.Dequeue(playerID, conn, matchmaking.EventTimeout) {
 						select {
 						case mid := <-notify:
 							genMatchID = mid

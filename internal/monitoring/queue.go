@@ -53,6 +53,8 @@ func queueEventColor(k matchmaking.EventKind) string {
 		return "#ff9500"
 	case matchmaking.EventPairRace:
 		return "#c08cff"
+	case matchmaking.EventSuperseded:
+		return "#ff4444"
 	default:
 		return "#888"
 	}
@@ -131,6 +133,13 @@ func renderQueuePage(snap matchmaking.Status, now time.Time) string {
 	}
 	b.WriteString(statCard("Pair Races", strconv.FormatInt(c.PairRaces, 10), raceColor,
 		"left the queue just as they matched"))
+
+	supColor := "#666"
+	if c.Superseded > 0 {
+		supColor = "#ff4444"
+	}
+	b.WriteString(statCard("Superseded", strconv.FormatInt(c.Superseded, 10), supColor,
+		"same playerId re-queued from another tab"))
 
 	waitSub := "no pairings yet"
 	if snap.Wait.Samples > 0 {

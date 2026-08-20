@@ -29,6 +29,10 @@ const (
 	// EventPairRace is a departure that lost the race with pairing: the player
 	// was already matched, so the departure was discarded.
 	EventPairRace EventKind = "pair-race"
+	// EventSuperseded is a waiting player displaced by a newer connection
+	// using the same playerID — typically a second browser tab sharing a
+	// stored playerId, or a refresh reconnecting before the old socket died.
+	EventSuperseded EventKind = "superseded"
 )
 
 // Event is one queue transition.
@@ -54,6 +58,10 @@ type Counters struct {
 	// PairRaces counts departures that lost the race with pairing. A handful is
 	// normal; a lot of them means players are giving up exactly as they match.
 	PairRaces int64 `json:"pairRaces"`
+	// Superseded counts waiting players replaced by a newer connection reusing
+	// the same playerID. Anything above the occasional refresh means clients
+	// are sharing one playerId across tabs.
+	Superseded int64 `json:"superseded"`
 }
 
 // WaitStats summarises how long the waiting player sat before being paired.
