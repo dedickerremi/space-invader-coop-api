@@ -7,6 +7,8 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -21,9 +23,66 @@ import (
 )
 
 var upgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool {
+	CheckOrigin: originAllowed,
+}
+
+// allowedOrigins is the ALLOWED_ORIGINS env var split on commas, e.g.
+// "https://invaders.dedickerremi.dev,https://*.vercel.app". Read once at
+// startup; the process is restarted on config change.
+var allowedOrigins = parseAllowedOrigins(os.Getenv("ALLOWED_ORIGINS"))
+
+func parseAllowedOrigins(raw string) []string {
+	var out []string
+	for _, o := range strings.Split(raw, ",") {
+		if o = strings.ToLower(strings.TrimSpace(o)); o != "" {
+			out = append(out, o)
+		}
+	}
+	return out
+}
+
+// originAllowed reports whether a request may open a WebSocket. Without it
+// gorilla accepts every Origin, so any page on the internet could open a
+// socket to this backend using a visitor's browser and play as them.
+//
+// A missing Origin header is allowed. Only browsers send one, and the header
+// exists to protect a browser user from a hostile page acting as them; a load
+// generator or CLI client has no such user to protect, and blocking it would
+// buy nothing an attacker could not sidestep by omitting the header from a
+// non-browser client anyway.
+//
+// An empty allowlist also allows everything, matching the previous behaviour.
+// That keeps a missing env var from taking the game offline on deploy —
+// ALLOWED_ORIGINS must actually be set in production for this to bite.
+func originAllowed(r *http.Request) bool {
+	raw := strings.TrimSpace(r.Header.Get("Origin"))
+	if raw == "" || len(allowedOrigins) == 0 {
 		return true
-	},
+	}
+
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		log.Printf("[WS] Rejected unparseable Origin %q", raw)
+		return false
+	}
+	origin := strings.ToLower(u.Scheme + "://" + u.Host)
+
+	for _, a := range allowedOrigins {
+		if a == origin {
+			return true
+		}
+		// "https://*.vercel.app" matches any subdomain, which is how Vercel
+		// addresses preview deployments. The dot is kept in the suffix so
+		// "https://evilvercel.app" does not match "https://*.vercel.app".
+		if i := strings.Index(a, "://*."); i != -1 {
+			if strings.HasPrefix(origin, a[:i+3]) && strings.HasSuffix(origin, a[i+4:]) {
+				return true
+			}
+		}
+	}
+
+	log.Printf("[WS] Rejected Origin %q (not in ALLOWED_ORIGINS)", origin)
+	return false
 }
 
 // Grace period before ending a match when a player disconnects.
