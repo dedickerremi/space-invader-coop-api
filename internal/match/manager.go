@@ -11,9 +11,8 @@ import (
 const maxMatches = 50
 
 var (
-	mu           sync.RWMutex
-	matches      = make(map[string]*types.Match)
-	tokenToPlayer = make(map[string]struct{ MatchID, PlayerID string })
+	mu      sync.RWMutex
+	matches = make(map[string]*types.Match)
 
 	finalizerMu sync.RWMutex
 	finalizer   func(*types.MatchSnapshot)
@@ -71,9 +70,14 @@ func GetActiveMatchCount() int {
 	return len(matches)
 }
 
-// RegisterToken registers a token for a player in a match, creating the match if needed.
+// JoinMatch seats a player in a match, creating it if this is the first
+// arrival. It takes no token: the caller has already proved who it is by
+// presenting a session (see session.go), and matchID came out of that session
+// rather than off the wire. That is what stops a client from conjuring a
+// match id or joining someone else's.
+//
 // mode should be "solo" or "coop" (defaults to "coop" if empty).
-func RegisterToken(token, matchID, playerID, mode string) bool {
+func JoinMatch(matchID, playerID, mode string) bool {
 	if mode == "" {
 		mode = "coop"
 	}
@@ -88,7 +92,6 @@ func RegisterToken(token, matchID, playerID, mode string) bool {
 		m := &types.Match{
 			MatchID:   matchID,
 			PlayerIDs: nil,
-			Tokens:    make(map[string]string),
 			State:     createInitialState(),
 			CreatedAt: time.Now().UnixMilli(),
 			Mode:      mode,
@@ -126,8 +129,6 @@ func RegisterToken(token, matchID, playerID, mode string) bool {
 	if !found {
 		m.PlayerIDs = append(m.PlayerIDs, playerID)
 	}
-	m.Tokens[playerID] = token
-	tokenToPlayer[token] = struct{ MatchID, PlayerID string }{matchID, playerID}
 	fmt.Printf("[MATCH] Registered player %s in %s (%d/%d)\n", playerID, matchID, len(m.PlayerIDs), capacity)
 	return true
 }
@@ -178,17 +179,6 @@ func MarkPersisted(matchID string) bool {
 	return true
 }
 
-// ValidateToken returns matchID and playerID for a token, or empty strings if invalid.
-func ValidateToken(token string) (matchID, playerID string) {
-	mu.RLock()
-	defer mu.RUnlock()
-	p, ok := tokenToPlayer[token]
-	if !ok {
-		return "", ""
-	}
-	return p.MatchID, p.PlayerID
-}
-
 // GetMatch returns the match for the given ID, or nil.
 func GetMatch(matchID string) *types.Match {
 	mu.RLock()
@@ -215,11 +205,12 @@ func RemoveMatch(matchID string) {
 		abandoned = buildSnapshotLocked(m, "abandoned")
 		m.Persisted = true
 	}
-	for _, token := range m.Tokens {
-		delete(tokenToPlayer, token)
-	}
 	delete(matches, matchID)
 	mu.Unlock()
+
+	// After the manager lock, never under it: session.go has its own lock and
+	// the two must not nest.
+	DropSessionsForMatch(matchID)
 	fmt.Printf("[MATCH] Removed %s\n", matchID)
 	if abandoned != nil {
 		fireFinalizer(abandoned)

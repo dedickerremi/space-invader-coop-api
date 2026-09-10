@@ -63,6 +63,7 @@ func main() {
 
 	// Start game loop in background (broadcasts state via hub)
 	go game.StartLoop(hub)
+	match.StartSessionReaper()
 
 	handleVersion := func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -102,6 +103,7 @@ func main() {
 	if port > 0 {
 		// Production: single PORT (Fly, Railway, Koyeb, etc.)
 		mux := http.NewServeMux()
+		mux.HandleFunc("/api/session", wsServer.HandleSession)
 		mux.HandleFunc("/api/version", handleVersion)
 		mux.HandleFunc("/api/game-meta", handleGameMeta)
 		mux.HandleFunc("/api/online", mon.HandleAPIOnline)
@@ -136,6 +138,7 @@ func main() {
 	}
 
 	// Development: two servers (WS on WS_PORT, monitoring on MONITORING_PORT)
+	http.HandleFunc("/api/session", wsServer.HandleSession)
 	http.HandleFunc("/api/version", handleVersion)
 	http.HandleFunc("/api/game-meta", handleGameMeta)
 	http.HandleFunc("/api/online", mon.HandleAPIOnline)

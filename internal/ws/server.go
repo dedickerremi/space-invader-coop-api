@@ -111,17 +111,25 @@ func (s *Server) HandleConnection(w http.ResponseWriter, r *http.Request) {
 	u := r.URL.Query()
 	token := u.Get("token")
 	authToken := u.Get("authToken")
-	matchID := u.Get("matchId")
-	playerID := u.Get("playerId")
-	mode := u.Get("mode")
 	platform := u.Get("platform")
-	if mode != "solo" && mode != "coop" {
-		mode = "coop"
-	}
 	clientIP := clientIPFromRequest(r)
 
-	fmt.Printf("[WS] New connection: token=%s..., authToken=%s, matchId=%s, playerId=%s, mode=%s\n",
-		trunc(token, 20), boolLabel(authToken != "", "yes", "no"), matchID, playerID, mode)
+	// Identity comes from the session, never from the query string. This
+	// handshake used to believe whatever playerId and matchId it was handed,
+	// so any client could name itself anything and walk into any match — and
+	// creating a match for an unknown id was how the match got made at all.
+	// The token is now the only input, and it is one this server minted.
+	sess := match.LookupSession(token)
+	if sess == nil {
+		s.Hub.Send(conn, types.ErrorMessage{Type: "ERROR", Reason: "Invalid or expired session"})
+		time.Sleep(200 * time.Millisecond)
+		return
+	}
+	playerID, matchID, mode := sess.PlayerID, sess.MatchID, sess.Mode
+
+	// The token is a credential; it does not go in the log.
+	fmt.Printf("[WS] New connection: playerId=%s, matchId=%q, mode=%s, authToken=%s\n",
+		playerID, matchID, mode, boolLabel(authToken != "", "yes", "no"))
 
 	// Single reader goroutine for the whole connection lifetime. The queue
 	// phase must select on queue events while still noticing disconnects —
@@ -149,14 +157,9 @@ func (s *Server) HandleConnection(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	// Matchmaking queue: client sends matchId=queue (or empty) in coop mode.
-	if mode == "coop" && (matchID == "" || matchID == "queue") {
-		if token == "" || playerID == "" {
-			s.Hub.Send(conn, types.ErrorMessage{Type: "ERROR", Reason: "Missing token or playerId"})
-			time.Sleep(200 * time.Millisecond)
-			return
-		}
-
+	// Matchmaking queue: a coop session has no match until the matchmaker
+	// pairs it with somebody.
+	if mode == "coop" && matchID == "" {
 		genMatchID, isWaiting, notify, superseded := matchmaking.Enqueue(playerID, conn)
 		if isWaiting {
 			s.Hub.Send(conn, types.QueuedMessage{Type: "QUEUED", Position: 1})
@@ -218,17 +221,20 @@ func (s *Server) HandleConnection(w http.ResponseWriter, r *http.Request) {
 		}
 
 		fmt.Printf("[QUEUE] Player %s matched → %s\n", playerID, genMatchID)
+		// Pin the match to the session so a reload reconnects into the same
+		// match instead of being thrown back into the queue.
+		match.BindSessionMatch(token, genMatchID)
 		s.Hub.Send(conn, types.MatchFoundMessage{Type: "MATCH_FOUND", MatchID: genMatchID})
 		matchID = genMatchID
 	}
 
-	if token == "" || matchID == "" || playerID == "" {
-		s.Hub.Send(conn, types.ErrorMessage{Type: "ERROR", Reason: "Missing token, matchId or playerId"})
+	if matchID == "" {
+		s.Hub.Send(conn, types.ErrorMessage{Type: "ERROR", Reason: "Session has no match"})
 		time.Sleep(200 * time.Millisecond)
 		return
 	}
 
-	if !match.RegisterToken(token, matchID, playerID, mode) {
+	if !match.JoinMatch(matchID, playerID, mode) {
 		s.Hub.Send(conn, types.ErrorMessage{Type: "ERROR", Reason: "Cannot join match (full or limit reached)"})
 		time.Sleep(200 * time.Millisecond)
 		return
@@ -338,13 +344,6 @@ done:
 	if game.GetPlayerCount(matchID) == 0 {
 		match.RemoveMatch(matchID)
 	}
-}
-
-func trunc(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n] + "..."
 }
 
 func boolLabel(b bool, yes, no string) string {
