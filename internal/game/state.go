@@ -2,6 +2,7 @@ package game
 
 import (
 	"fmt"
+	"math"
 	"math/rand"
 
 	"space-invaders-coop/backend-go/internal/match"
@@ -152,6 +153,7 @@ func deepCopyState(s *types.GameState) *types.GameState {
 		Points:            points,
 		Kills:             kills,
 		LevelName:         s.LevelName,
+		LevelTitle:        s.LevelTitle,
 		WaveNumber:        s.WaveNumber,
 		WaveName:          s.WaveName,
 		TotalWaves:        s.TotalWaves,
@@ -226,13 +228,14 @@ func AddPlayer(matchID, playerID string) *types.Player {
 			m.State.BestStreaks[pl.ID] = 0
 		}
 		// Start wave 1 of the first level
-		m.State.LevelName = FirstLevel()
+		m.State.LevelName = FirstLevel(m.Mode)
 		m.State.WaveNumber = 1
 		m.State.WaveTick = 0
 		m.State.WaveCleared = false
 		m.State.WaveCooldown = 0
 		m.State.NextWaveCountdown = 0
 		if level := GetLevelByName(m.State.LevelName); level != nil && len(level.Waves) > 0 {
+			m.State.LevelTitle = level.Title
 			m.State.WaveName = level.Waves[0].Name
 			m.State.TotalWaves = len(level.Waves)
 		}
@@ -523,7 +526,7 @@ func tickWaveSpawning(s *types.GameState) {
 		// End of regular waves and the level has a boss we haven't beaten
 		// yet — launch the boss fight instead of advancing.
 		if onLastWave && level.BossKind != "" && !s.BossDefeated {
-			spawnBoss(s, level.BossKind)
+			spawnBoss(s, level.BossKind, level.BossHP)
 			return
 		}
 
@@ -542,6 +545,7 @@ func tickWaveSpawning(s *types.GameState) {
 				return
 			}
 			s.LevelName = nextName
+			s.LevelTitle = nextLevel.Title
 			s.WaveNumber = 1
 			s.WaveName = nextLevel.Waves[0].Name
 			s.TotalWaves = len(nextLevel.Waves)
@@ -558,31 +562,46 @@ func tickWaveSpawning(s *types.GameState) {
 	}
 	wave := &level.Waves[waveIdx]
 
-	// Spawn enemies whose tick offset has been reached
-	for _, spawn := range wave.Spawns {
-		if spawn.TickOffset == s.WaveTick {
-			enemy := types.Enemy{
-				X:          spawn.X,
-				Y:          spawn.Y,
-				Type:       string(spawn.Kind),
-				SpawnX:     spawn.X,
-				PatternDir: 1,
-				ShootTimer: randomShootDelay(spawn.Kind),
+	if s.WaveTick == 0 || len(s.WaveGroups) != len(wave.Groups) {
+		s.WaveGroups = make([]types.GroupProgress, len(wave.Groups))
+	}
+
+	// Groups start on a fixed tick or chain on the previous group. Each
+	// member then spawns Stagger ticks after the one before it, which is
+	// what turns a formation into a cascade.
+	alive := groupsAlive(s.Enemies, len(wave.Groups))
+	allSpawned := true
+	for gi := range wave.Groups {
+		g := &wave.Groups[gi]
+		p := &s.WaveGroups[gi]
+
+		if !p.Started {
+			if !groupReady(s, wave, gi) {
+				allSpawned = false
+				continue
 			}
-			s.Enemies = append(s.Enemies, enemy)
+			p.Started = true
+			p.StartTick = s.WaveTick
+		}
+
+		for p.Spawned < len(g.Slots) && s.WaveTick >= p.StartTick+p.Spawned*g.Stagger {
+			s.Enemies = append(s.Enemies, newGroupEnemy(g, gi+1, p.Spawned, level.FireRate))
+			p.Spawned++
+			alive[gi]++
+			if p.Spawned == len(g.Slots) {
+				p.SpawnedAt = s.WaveTick
+			}
+		}
+
+		if p.Spawned < len(g.Slots) {
+			allSpawned = false
+		} else if !p.Cleared && alive[gi] == 0 {
+			p.Cleared = true
+			p.ClearedAt = s.WaveTick
 		}
 	}
 
 	s.WaveTick++
-
-	// Check if all spawns have been triggered and all enemies are gone
-	allSpawned := true
-	for _, spawn := range wave.Spawns {
-		if spawn.TickOffset >= s.WaveTick {
-			allSpawned = false
-			break
-		}
-	}
 
 	if allSpawned && len(s.Enemies) == 0 {
 		// Wave cleared — start cooldown for next wave
@@ -592,12 +611,108 @@ func tickWaveSpawning(s *types.GameState) {
 	}
 }
 
+// groupReady reports whether group gi may start on the current wave tick.
+// Validation guarantees a chained group is never the first one.
+func groupReady(s *types.GameState, wave *WaveDefinition, gi int) bool {
+	g := &wave.Groups[gi]
+	switch g.Trigger {
+	case TriggerSpawned:
+		prev := s.WaveGroups[gi-1]
+		return prev.Spawned == len(wave.Groups[gi-1].Slots) && s.WaveTick >= prev.SpawnedAt+g.Delay
+	case TriggerCleared:
+		prev := s.WaveGroups[gi-1]
+		return prev.Cleared && s.WaveTick >= prev.ClearedAt+g.Delay
+	default:
+		return s.WaveTick >= g.At
+	}
+}
+
+// groupsAlive counts the wave's enemies still on screen, per group.
+func groupsAlive(enemies []types.Enemy, groups int) []int {
+	alive := make([]int, groups)
+	for _, e := range enemies {
+		if e.Group > 0 && e.Group <= groups {
+			alive[e.Group-1]++
+		}
+	}
+	return alive
+}
+
+// Entry paths, in ticks and px.
+const (
+	entryTopTicks  = 36  // ~1.2 s drop from above the screen
+	entrySideTicks = 60  // ~2 s swoop from a screen edge
+	entrySideStart = 60  // height a side swoop enters the screen at
+	entrySideDip   = 170 // how far below its slot a side swoop dips
+	entryDipMaxY   = 320 // keeps swoops above the players' zone
+)
+
+// newGroupEnemy creates member `member` of group g, placed at the start of
+// its entry path. fireRate scales how often it shoots.
+func newGroupEnemy(g *GroupDefinition, group, member int, fireRate float64) types.Enemy {
+	slot := g.Slots[member]
+	e := types.Enemy{
+		X:            slot.X,
+		Y:            slot.Y,
+		Type:         string(g.Kind),
+		SpawnX:       slot.X,
+		PatternDir:   1,
+		Group:        group,
+		SlotX:        slot.X,
+		SlotY:        slot.Y,
+		Hold:         g.Hold,
+		ReleaseTimer: g.Release,
+	}
+	base := staticShootInterval
+	switch {
+	case g.Kind == EnemyPatrol:
+		base = patrolShootInterval
+	case g.Hold:
+		base = holdShootInterval
+	}
+	if fireRate <= 0 {
+		fireRate = 1
+	}
+	e.ShootEvery = max(1, round(float64(base)/fireRate))
+	e.ShootTimer = jitter(e.ShootEvery)
+
+	switch g.Entry {
+	case EntryTop:
+		// Control point halfway along the drop: a straight line, eased in.
+		e.EntryFromX, e.EntryFromY = slot.X, -enemySize
+		e.EntryCtrlX, e.EntryCtrlY = slot.X, (slot.Y-enemySize)/2
+		e.EntryDur = entryTopTicks
+	case EntryLeft, EntryRight:
+		// Enter high at the edge, dip below the slot, rise back onto it.
+		e.EntryFromY = entrySideStart
+		e.EntryCtrlY = min(slot.Y+entrySideDip, entryDipMaxY)
+		if g.Entry == EntryLeft {
+			e.EntryFromX = -enemySize
+			e.EntryCtrlX = slot.X * 6 / 10
+		} else {
+			e.EntryFromX = gameWidth + enemySize
+			e.EntryCtrlX = gameWidth - (gameWidth-slot.X)*6/10
+		}
+		e.EntryDur = entrySideTicks
+	}
+	if e.EntryDur > 0 {
+		e.X, e.Y = e.EntryFromX, e.EntryFromY
+	}
+	return e
+}
+
 func randomShootDelay(kind EnemyKind) int {
 	base := staticShootInterval
 	if kind == EnemyPatrol {
 		base = patrolShootInterval
 	}
-	// Randomize ±30% so enemies don't all fire in sync
+	return jitter(base)
+}
+
+// jitter randomizes a shot interval by ±30% so enemies don't all fire in
+// sync. Only the timing of shots varies between runs; the choreography does
+// not, so a wave can be learned.
+func jitter(base int) int {
 	variance := base * 30 / 100
 	if variance == 0 {
 		return base
@@ -605,50 +720,142 @@ func randomShootDelay(kind EnemyKind) int {
 	return base - variance + rand.Intn(2*variance)
 }
 
+// nextShot returns the ticks until e fires again. Enemies from the wave
+// spawner carry their level-scaled interval; boss escorts fall back on the
+// default for their role.
+func nextShot(e *types.Enemy, fallback int) int {
+	if e.ShootEvery > 0 {
+		return jitter(e.ShootEvery)
+	}
+	return jitter(fallback)
+}
+
 // --- Enemy AI ---
+
+// Formation holding and diving.
+const (
+	holdShootInterval = 150 // ~5 s between shots for a static holding its slot
+	holdSwayAmplitude = 20  // px a holding formation sways either side of its slots
+	holdSwayPeriod    = 120 // ticks per full sway (~4 s)
+	holdSwayRampTicks = 30  // ease the sway in so arriving on a slot never jumps
+	diveSpeed         = 2   // px/tick once released from formation
+)
 
 func tickEnemyAI(s *types.GameState) {
 	for i := range s.Enemies {
 		e := &s.Enemies[i]
 
+		if e.EntryTick < e.EntryDur {
+			advanceEntry(e)
+			continue // nobody shoots before reaching their slot
+		}
+
+		if e.Hold {
+			tickHolding(s, e)
+			continue
+		}
+
 		switch e.Type {
 		case "static":
-			// Static drifts down silently — only patrol enemies shoot so
-			// the bullet volume stays readable at high wave counts.
-			e.Y += staticEnemySpeed
+			// Static drifts down silently — only patrol enemies and holding
+			// formations shoot, so the bullet volume stays readable.
+			if e.Diving {
+				e.Y += diveSpeed
+			} else {
+				e.Y += staticEnemySpeed
+			}
 
 		case "patrol":
-			// Patrol: zigzag horizontally + drift down
-			e.X += e.PatternDir * patrolHorizontalSpeed
-			e.Y += patrolEnemySpeed
-
-			// Reverse at amplitude bounds
-			if e.X > e.SpawnX+patrolAmplitude || e.X >= gameWidth-20 {
-				e.PatternDir = -1
-			} else if e.X < e.SpawnX-patrolAmplitude || e.X <= 20 {
-				e.PatternDir = 1
+			vy := patrolEnemySpeed
+			if e.Diving {
+				vy = diveSpeed
 			}
-
-			// Shoot 3 bullets: straight + 2 diagonals
-			e.ShootTimer--
-			if e.ShootTimer <= 0 {
-				e.ShootTimer = randomShootDelay(EnemyPatrol)
-				baseY := float64(e.Y + enemySize/2)
-				baseX := float64(e.X)
-				// Straight down
-				s.EnemyBullets = append(s.EnemyBullets, types.EnemyBullet{
-					X: baseX, Y: baseY, DX: 0, DY: enemyBulletSpeed,
-				})
-				// Diagonal left
-				s.EnemyBullets = append(s.EnemyBullets, types.EnemyBullet{
-					X: baseX, Y: baseY, DX: -enemyBulletDiagSpeed, DY: enemyBulletSpeed,
-				})
-				// Diagonal right
-				s.EnemyBullets = append(s.EnemyBullets, types.EnemyBullet{
-					X: baseX, Y: baseY, DX: enemyBulletDiagSpeed, DY: enemyBulletSpeed,
-				})
-			}
+			patrolStep(s, e, vy)
 		}
+	}
+}
+
+// advanceEntry moves an enemy one tick along its entry path: a quadratic
+// Bézier from EntryFrom through EntryCtrl onto its slot, eased out so it
+// settles into formation instead of stopping dead.
+func advanceEntry(e *types.Enemy) {
+	e.EntryTick++
+	t := float64(e.EntryTick) / float64(e.EntryDur)
+	t = 1 - (1-t)*(1-t)
+	u := 1 - t
+	e.X = round(u*u*float64(e.EntryFromX) + 2*u*t*float64(e.EntryCtrlX) + t*t*float64(e.SlotX))
+	e.Y = round(u*u*float64(e.EntryFromY) + 2*u*t*float64(e.EntryCtrlY) + t*t*float64(e.SlotY))
+}
+
+// tickHolding keeps an enemy on its formation slot until it is released.
+func tickHolding(s *types.GameState, e *types.Enemy) {
+	e.HoldTick++
+
+	switch e.Type {
+	case "static":
+		// The formation sways as one: the phase comes from the wave clock,
+		// so every member moves in step regardless of when it arrived.
+		ramp := math.Min(1, float64(e.HoldTick)/holdSwayRampTicks)
+		phase := 2 * math.Pi * float64(s.WaveTick) / holdSwayPeriod
+		e.X = e.SlotX + round(ramp*holdSwayAmplitude*math.Sin(phase))
+		e.Y = e.SlotY
+
+		// A holding static never reaches the bottom, so it has to be a
+		// threat some other way: a single slow straight shot.
+		e.ShootTimer--
+		if e.ShootTimer <= 0 {
+			e.ShootTimer = nextShot(e, holdShootInterval)
+			s.EnemyBullets = append(s.EnemyBullets, types.EnemyBullet{
+				X: float64(e.X), Y: float64(e.Y + enemySize/2), DX: 0, DY: enemyBulletSpeed,
+			})
+		}
+
+	case "patrol":
+		patrolStep(s, e, 0) // zigzag around the slot without drifting down
+	}
+
+	if e.ReleaseTimer > 0 {
+		e.ReleaseTimer--
+		if e.ReleaseTimer == 0 {
+			e.Hold = false
+			e.Diving = true
+			e.SpawnX = e.X
+		}
+	}
+}
+
+// patrolStep zigzags a patrol around SpawnX, moves it down by vy and fires
+// its three-way shot when due.
+func patrolStep(s *types.GameState, e *types.Enemy, vy int) {
+	// Patrol: zigzag horizontally + drift down
+	e.X += e.PatternDir * patrolHorizontalSpeed
+	e.Y += vy
+
+	// Reverse at amplitude bounds
+	if e.X > e.SpawnX+patrolAmplitude || e.X >= gameWidth-20 {
+		e.PatternDir = -1
+	} else if e.X < e.SpawnX-patrolAmplitude || e.X <= 20 {
+		e.PatternDir = 1
+	}
+
+	// Shoot 3 bullets: straight + 2 diagonals
+	e.ShootTimer--
+	if e.ShootTimer <= 0 {
+		e.ShootTimer = nextShot(e, patrolShootInterval)
+		baseY := float64(e.Y + enemySize/2)
+		baseX := float64(e.X)
+		// Straight down
+		s.EnemyBullets = append(s.EnemyBullets, types.EnemyBullet{
+			X: baseX, Y: baseY, DX: 0, DY: enemyBulletSpeed,
+		})
+		// Diagonal left
+		s.EnemyBullets = append(s.EnemyBullets, types.EnemyBullet{
+			X: baseX, Y: baseY, DX: -enemyBulletDiagSpeed, DY: enemyBulletSpeed,
+		})
+		// Diagonal right
+		s.EnemyBullets = append(s.EnemyBullets, types.EnemyBullet{
+			X: baseX, Y: baseY, DX: enemyBulletDiagSpeed, DY: enemyBulletSpeed,
+		})
 	}
 }
 

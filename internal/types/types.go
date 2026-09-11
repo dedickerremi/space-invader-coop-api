@@ -63,6 +63,34 @@ type Enemy struct {
 	SpawnX     int `json:"-"` // original X for patrol pattern
 	PatternDir int `json:"-"` // current horizontal direction for patrol: -1 or 1
 	ShootTimer int `json:"-"` // ticks until next shot
+	ShootEvery int `json:"-"` // base ticks between shots, scaled by the level's fire rate; 0 = the kind's default
+
+	// Choreography. Zero values give the original behaviour — appear in
+	// place and descend according to Type — which is what boss escorts rely
+	// on, since they are created outside the wave spawner.
+	Group        int  `json:"-"` // 1-based group index within the wave; 0 = none
+	SlotX        int  `json:"-"` // formation slot the entry path ends on
+	SlotY        int  `json:"-"`
+	EntryTick    int  `json:"-"` // ticks spent on the entry path so far
+	EntryDur     int  `json:"-"` // entry path length in ticks; 0 = no entry
+	EntryFromX   int  `json:"-"` // entry path start
+	EntryFromY   int  `json:"-"`
+	EntryCtrlX   int  `json:"-"` // quadratic Bézier control point
+	EntryCtrlY   int  `json:"-"`
+	Hold         bool `json:"-"` // keeps its slot instead of descending
+	HoldTick     int  `json:"-"` // ticks spent holding the slot, to ease the sway in
+	ReleaseTimer int  `json:"-"` // holding ticks left before diving; 0 = hold until killed
+	Diving       bool `json:"-"` // released from formation: descends at dive speed
+}
+
+// GroupProgress is the runtime state of one spawn group in the current wave.
+type GroupProgress struct {
+	Started   bool
+	StartTick int // wave tick the group started on
+	Spawned   int // members spawned so far
+	SpawnedAt int // wave tick the last member spawned on
+	Cleared   bool
+	ClearedAt int // wave tick the group was first seen fully destroyed
 }
 
 // PlayerScore is one player's score in the game-over summary.
@@ -150,6 +178,7 @@ type GameState struct {
 	Deaths            map[string]int   `json:"-"`      // playerId -> deaths (for match summary)
 	BestStreaks       map[string]int   `json:"-"`      // playerId -> max streak this match
 	LevelName         string           `json:"levelName"`
+	LevelTitle        string           `json:"levelTitle,omitempty"` // display name; levelName is the storage key
 	WaveNumber        int              `json:"waveNumber"`
 	WaveName          string           `json:"waveName"`
 	TotalWaves        int              `json:"totalWaves"`
@@ -163,11 +192,12 @@ type GameState struct {
 	Boss              *Boss            `json:"boss,omitempty"`
 
 	// Internal wave tracking (not sent to client)
-	WaveTick     int      `json:"-"` // ticks since current wave started
-	WaveCleared  bool     `json:"-"` // all enemies from current wave are dead/gone
-	WaveCooldown int      `json:"-"` // ticks to wait before starting next wave
-	BossDefeated bool     `json:"-"` // true once the current level's boss has been killed
-	BossesKilled []string `json:"-"` // boss kinds defeated this match, for stats
+	WaveTick     int             `json:"-"` // ticks since current wave started
+	WaveCleared  bool            `json:"-"` // all enemies from current wave are dead/gone
+	WaveCooldown int             `json:"-"` // ticks to wait before starting next wave
+	BossDefeated bool            `json:"-"` // true once the current level's boss has been killed
+	BossesKilled []string        `json:"-"` // boss kinds defeated this match, for stats
+	WaveGroups   []GroupProgress `json:"-"` // per-group spawn progress for the current wave
 }
 
 // Match holds match metadata and game state.

@@ -1,0 +1,53 @@
+{
+  "title": "Sector 2 — Flank Run",
+  "waves": [
+    {
+      "name": "Left Wing",
+      "groups": [
+        { "kind": "static", "count": 6, "entry": "left", "order": "right-to-left", "stagger": 8 },
+        { "kind": "static", "count": 6, "entry": "right", "order": "left-to-right", "stagger": 8, "after": "cleared", "delay": 20 }
+      ]
+    },
+    {
+      "name": "Crossfire",
+      "groups": [
+        { "kind": "patrol", "count": 2, "x": 230, "y": 90, "spacing": 110, "entry": "left", "stagger": 15 },
+        { "kind": "patrol", "count": 2, "x": 570, "y": 90, "spacing": 110, "entry": "right", "stagger": 15, "at": 45 },
+        { "kind": "static", "count": 6, "y": 140, "order": "center-out", "stagger": 6, "after": "cleared", "delay": 15 }
+      ]
+    },
+    {
+      "name": "Shield Wall",
+      "groups": [
+        { "kind": "static", "count": 8, "y": 60, "order": "center-out", "stagger": 5, "behavior": "hold", "release": 300 },
+        { "kind": "patrol", "count": 2, "formation": "column", "x": 110, "y": 130, "entry": "left", "stagger": 15, "at": 60 },
+        { "kind": "patrol", "count": 2, "formation": "column", "x": 690, "y": 130, "entry": "right", "stagger": 15, "at": 60 }
+      ]
+    },
+    {
+      "name": "Swoop",
+      "groups": [
+        { "kind": "static", "count": 5, "formation": "arc", "x": 250, "entry": "left", "stagger": 10, "behavior": "hold", "release": 180 },
+        { "kind": "static", "count": 5, "formation": "arc", "x": 550, "entry": "right", "stagger": 10, "behavior": "hold", "release": 180, "after": "spawned", "delay": 10 },
+        { "kind": "patrol", "count": 2, "spacing": 200, "y": 170, "stagger": 12, "after": "cleared", "delay": 20 }
+      ]
+    },
+    {
+      "name": "Gauntlet",
+      "groups": [
+        { "kind": "patrol", "count": 3, "spacing": 150, "y": 50, "entry": "right", "stagger": 12, "behavior": "hold", "release": 180 },
+        { "kind": "static", "count": 7, "formation": "v", "y": 100, "stagger": 5, "at": 30 },
+        { "kind": "static", "count": 4, "y": 160, "entry": "left", "order": "right-to-left", "stagger": 8, "after": "cleared", "delay": 15 }
+      ]
+    },
+    {
+      "name": "Pursuit",
+      "groups": [
+        { "kind": "static", "count": 5, "y": 70, "entry": "left", "order": "right-to-left", "stagger": 7 },
+        { "kind": "static", "count": 5, "y": 120, "entry": "right", "order": "left-to-right", "stagger": 7 },
+        { "kind": "patrol", "count": 2, "spacing": 240, "y": 40, "stagger": 12, "behavior": "hold", "release": 120, "after": "cleared", "delay": 10 }
+      ]
+    }
+  ],
+  "boss": { "kind": "sentinel", "hp": 20 }
+}
