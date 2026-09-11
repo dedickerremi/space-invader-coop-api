@@ -17,6 +17,9 @@
         { "kind": "patrol", "count": 2, "formation": "column", "x": 90, "y": 140, "entry": "left", "stagger": 12, "at": 60 },
         { "kind": "patrol", "count": 2, "formation": "column", "x": 710, "y": 140, "entry": "right", "stagger": 12, "at": 60 },
         { "kind": "static", "count": 5, "formation": "v", "y": 160, "entry": "left", "stagger": 6, "after": "cleared", "delay": 15 }
+      ],
+      "carriers": [
+        { "kind": "courier", "delay": 45 }
       ]
     },
     {
@@ -33,6 +36,9 @@
         { "kind": "patrol", "count": 6, "formation": "grid", "cols": 3, "spacing": 190, "y": 50, "stagger": 8, "behavior": "hold", "release": 240 },
         { "kind": "static", "count": 5, "formation": "v", "y": 150, "entry": "left", "stagger": 6, "at": 40 },
         { "kind": "static", "count": 5, "formation": "v", "y": 150, "entry": "right", "stagger": 6, "after": "cleared", "delay": 15 }
+      ],
+      "carriers": [
+        { "kind": "asteroid", "group": 2 }
       ]
     },
     {
@@ -40,6 +46,9 @@
       "groups": [
         { "kind": "static", "count": 7, "y": 70, "order": "left-to-right", "stagger": 7 },
         { "kind": "static", "count": 5, "y": 70, "order": "right-to-left", "stagger": 7, "after": "cleared", "delay": 20 }
+      ],
+      "carriers": [
+        { "kind": "asteroid", "delay": 30, "drop": "shield" }
       ]
     },
     {
@@ -57,6 +66,9 @@
         { "kind": "static", "count": 8, "x": 430, "y": 60, "entry": "left", "order": "right-to-left", "stagger": 4, "behavior": "hold", "release": 240 },
         { "kind": "patrol", "count": 3, "x": 450, "y": 170, "spacing": 150, "entry": "left", "stagger": 10, "after": "spawned", "delay": 20 },
         { "kind": "static", "count": 3, "x": 650, "y": 200, "entry": "right", "order": "left-to-right", "stagger": 8, "after": "cleared", "delay": 15 }
+      ],
+      "carriers": [
+        { "kind": "courier", "from": "right", "delay": 60 }
       ]
     },
     {

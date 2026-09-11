@@ -22,6 +22,9 @@
         { "kind": "static", "count": 9, "formation": "arc", "order": "center-out", "stagger": 4 },
         { "kind": "patrol", "count": 2, "spacing": 520, "y": 170, "stagger": 10, "at": 45 },
         { "kind": "static", "count": 6, "y": 170, "entry": "left", "order": "right-to-left", "stagger": 6, "after": "cleared", "delay": 15 }
+      ],
+      "carriers": [
+        { "kind": "asteroid", "delay": 60 }
       ]
     },
     {
@@ -30,6 +33,9 @@
         { "kind": "static", "count": 8, "y": 50, "order": "left-to-right", "stagger": 5, "behavior": "hold", "release": 240 },
         { "kind": "patrol", "count": 3, "spacing": 220, "y": 130, "entry": "right", "stagger": 12, "at": 60 },
         { "kind": "static", "count": 6, "y": 130, "entry": "left", "order": "right-to-left", "stagger": 6, "after": "cleared", "delay": 15 }
+      ],
+      "carriers": [
+        { "kind": "courier", "delay": 90 }
       ]
     },
     {
@@ -45,6 +51,9 @@
       "groups": [
         { "kind": "static", "count": 7, "y": 70, "entry": "left", "order": "right-to-left", "stagger": 6 },
         { "kind": "static", "count": 7, "y": 120, "entry": "right", "order": "left-to-right", "stagger": 6 }
+      ],
+      "carriers": [
+        { "kind": "asteroid", "delay": 30 }
       ]
     }
   ]

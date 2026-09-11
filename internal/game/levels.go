@@ -60,9 +60,10 @@ type GroupDefinition struct {
 // --- Wave definition ---
 
 type WaveDefinition struct {
-	Number int
-	Name   string
-	Groups []GroupDefinition
+	Number   int
+	Name     string
+	Groups   []GroupDefinition
+	Carriers []CarrierDefinition
 }
 
 // EnemyCount returns how many enemies the wave spawns in total.
@@ -176,6 +177,9 @@ type jsonWave struct {
 
 	// Choreographed format.
 	Groups []jsonGroup `json:"groups"`
+
+	// Bonus carriers, launched relative to the wave's groups.
+	Carriers []jsonCarrier `json:"carriers"`
 }
 
 type jsonGroup struct {
@@ -274,6 +278,14 @@ func ParseLevelJSON(data []byte) (*LevelDefinition, error) {
 			}
 		default:
 			wave.Groups = rowsToGroups(jw)
+		}
+
+		for ci, jc := range jw.Carriers {
+			c, err := buildCarrier(jc, len(wave.Groups))
+			if err != nil {
+				return nil, fmt.Errorf("wave %d (%q) carrier %d: %w", i+1, jw.Name, ci+1, err)
+			}
+			wave.Carriers = append(wave.Carriers, c)
 		}
 
 		if wave.EnemyCount() > 0 {

@@ -2,6 +2,7 @@ package game
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -18,6 +19,17 @@ var campaignBrief = map[string]struct {
 }
 
 const budgetTolerance = 10 // percent either side of a level's target
+
+// maxCarriersPerLevel keeps scripted bonuses occasional.
+const maxCarriersPerLevel = 4
+
+func carriersIn(def *LevelDefinition) []CarrierDefinition {
+	var all []CarrierDefinition
+	for _, w := range def.Waves {
+		all = append(all, w.Carriers...)
+	}
+	return all
+}
 
 var campaignBosses = []string{"", BossSentinel, BossWarden, BossCitadel, BossNexus}
 
@@ -57,6 +69,17 @@ func TestCampaignsFollowTheirBrief(t *testing.T) {
 				}
 				if def.Title == "" {
 					t.Errorf("%s: missing title", names[i])
+				}
+				// Bonuses are rare but placed: every level offers its
+				// firepower once, on a courier the players have to shoot down.
+				carriers := carriersIn(def)
+				if len(carriers) > maxCarriersPerLevel {
+					t.Errorf("%s: %d carriers, keep it to %d", names[i], len(carriers), maxCarriersPerLevel)
+				}
+				if !slices.ContainsFunc(carriers, func(c CarrierDefinition) bool {
+					return c.Kind == CarrierCourier && c.Drop == "double_shot"
+				}) {
+					t.Errorf("%s: no courier carrying double_shot", names[i])
 				}
 				if def.BossKind != campaignBosses[i] {
 					t.Errorf("%s: boss %q, want %q", names[i], def.BossKind, campaignBosses[i])
@@ -157,6 +180,10 @@ func TestCampaignsPlayThrough(t *testing.T) {
 	for mode := range campaignBrief {
 		t.Run(mode, func(t *testing.T) {
 			names := CampaignLevels(mode)
+			scripted := 0
+			for _, n := range names {
+				scripted += len(carriersIn(GetLevelByName(n)))
+			}
 			s := newWaveState(names[0])
 			var bosses []string
 			levelStart, bossTicks := 0, 0
@@ -194,6 +221,10 @@ func TestCampaignsPlayThrough(t *testing.T) {
 			}
 			if !s.Victory {
 				t.Fatalf("%s campaign stalled at %s wave %d after %d ticks", mode, s.LevelName, s.WaveNumber, tick)
+			}
+			// Carriers are never ticked here, so every launched one is still listed.
+			if len(s.Carriers) != scripted {
+				t.Fatalf("%d of %d scripted carriers launched", len(s.Carriers), scripted)
 			}
 			want := campaignBosses[1:]
 			if strings.Join(bosses, ",") != strings.Join(want, ",") {

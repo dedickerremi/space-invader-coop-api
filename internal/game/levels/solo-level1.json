@@ -21,6 +21,9 @@
       "groups": [
         { "kind": "static", "count": 7, "formation": "arc", "order": "center-out", "stagger": 5 },
         { "kind": "patrol", "count": 2, "spacing": 360, "y": 160, "stagger": 10, "after": "spawned", "delay": 30 }
+      ],
+      "carriers": [
+        { "kind": "asteroid", "delay": 60 }
       ]
     },
     {
@@ -29,6 +32,9 @@
         { "kind": "static", "count": 6, "y": 70, "order": "left-to-right", "stagger": 6, "behavior": "hold", "release": 240 },
         { "kind": "static", "count": 4, "y": 140, "entry": "left", "order": "right-to-left", "stagger": 8, "after": "spawned", "delay": 20 },
         { "kind": "patrol", "count": 2, "spacing": 300, "y": 110, "entry": "right", "stagger": 12, "after": "cleared", "delay": 20 }
+      ],
+      "carriers": [
+        { "kind": "courier", "delay": 90 }
       ]
     },
     {
