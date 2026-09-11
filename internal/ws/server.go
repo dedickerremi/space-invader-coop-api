@@ -27,18 +27,64 @@ var upgrader = websocket.Upgrader{
 }
 
 // allowedOrigins is the ALLOWED_ORIGINS env var split on commas, e.g.
-// "https://invaders.dedickerremi.dev,https://*.vercel.app". Read once at
-// startup; the process is restarted on config change.
-var allowedOrigins = parseAllowedOrigins(os.Getenv("ALLOWED_ORIGINS"))
+// "https://*.dedickerremi.dev". Read once at startup; the process is
+// restarted on config change.
+//
+// Only put a wildcard on a domain you control. On a shared hosting suffix
+// such as *.vercel.app, *.netlify.app or *.github.io, anyone who deploys a
+// site there passes the check, which defeats the point of having one.
+var allowedOrigins = loadAllowedOrigins()
 
+// loadAllowedOrigins reads ALLOWED_ORIGINS and logs the effective policy, so
+// whether enforcement is on can be answered from the boot logs alone.
+func loadAllowedOrigins() []string {
+	list := parseAllowedOrigins(os.Getenv("ALLOWED_ORIGINS"))
+	if len(list) == 0 {
+		log.Printf("[WS] ALLOWED_ORIGINS unset: accepting WebSocket upgrades from any origin")
+	} else {
+		log.Printf("[WS] Accepting WebSocket upgrades from: %s", strings.Join(list, ", "))
+	}
+	return list
+}
+
+// parseAllowedOrigins normalizes each entry the same way originAllowed
+// normalizes the incoming header, so a trailing slash, a path or an explicit
+// default port in the env var cannot silently match nothing. An entry that
+// is not an origin at all is dropped with a log line rather than kept as a
+// string no browser will ever send.
 func parseAllowedOrigins(raw string) []string {
 	var out []string
 	for _, o := range strings.Split(raw, ",") {
-		if o = strings.ToLower(strings.TrimSpace(o)); o != "" {
-			out = append(out, o)
+		if o = strings.TrimSpace(o); o == "" {
+			continue
 		}
+		n, ok := normalizeOrigin(o)
+		if !ok {
+			log.Printf("[WS] Ignoring ALLOWED_ORIGINS entry %q: expected scheme://host", o)
+			continue
+		}
+		out = append(out, n)
 	}
 	return out
+}
+
+// normalizeOrigin reduces an origin to lower-case "scheme://host[:port]",
+// dropping any path and a port that is the scheme's default. Browsers never
+// send either in an Origin header, so neither may take part in matching.
+func normalizeOrigin(raw string) (string, bool) {
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return "", false
+	}
+	scheme := strings.ToLower(u.Scheme)
+	host := strings.ToLower(u.Host)
+	switch scheme {
+	case "https":
+		host = strings.TrimSuffix(host, ":443")
+	case "http":
+		host = strings.TrimSuffix(host, ":80")
+	}
+	return scheme + "://" + host, true
 }
 
 // originAllowed reports whether a request may open a WebSocket. Without it
@@ -60,20 +106,18 @@ func originAllowed(r *http.Request) bool {
 		return true
 	}
 
-	u, err := url.Parse(raw)
-	if err != nil || u.Scheme == "" || u.Host == "" {
+	origin, ok := normalizeOrigin(raw)
+	if !ok {
 		log.Printf("[WS] Rejected unparseable Origin %q", raw)
 		return false
 	}
-	origin := strings.ToLower(u.Scheme + "://" + u.Host)
 
 	for _, a := range allowedOrigins {
 		if a == origin {
 			return true
 		}
-		// "https://*.vercel.app" matches any subdomain, which is how Vercel
-		// addresses preview deployments. The dot is kept in the suffix so
-		// "https://evilvercel.app" does not match "https://*.vercel.app".
+		// "https://*.dedickerremi.dev" matches any subdomain. The dot is kept
+		// in the suffix so "https://evildedickerremi.dev" does not match.
 		if i := strings.Index(a, "://*."); i != -1 {
 			if strings.HasPrefix(origin, a[:i+3]) && strings.HasSuffix(origin, a[i+4:]) {
 				return true
