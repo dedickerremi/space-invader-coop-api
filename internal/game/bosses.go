@@ -52,9 +52,14 @@ func statsFor(kind string) bossStats {
 // --- Spawn & naming ---
 
 // spawnBoss creates a Boss of the given kind and writes it into the game
-// state. Caller is responsible for clearing/pausing the regular wave loop.
-func spawnBoss(s *types.GameState, kind string) {
+// state. hp overrides the kind's default when positive, so a campaign can
+// size the same boss for one player or two. Caller is responsible for
+// clearing/pausing the regular wave loop.
+func spawnBoss(s *types.GameState, kind string, hp int) {
 	stats := statsFor(kind)
+	if hp > 0 {
+		stats.maxHP = hp
+	}
 	s.Boss = &types.Boss{
 		Kind:        kind,
 		X:           gameWidth / 2,

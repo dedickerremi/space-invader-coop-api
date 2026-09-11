@@ -1,0 +1,51 @@
+{
+  "title": "Sector 1 — First Contact",
+  "waves": [
+    {
+      "name": "Scouts",
+      "groups": [
+        { "kind": "static", "count": 7, "y": 70, "order": "left-to-right", "stagger": 6 },
+        { "kind": "static", "count": 7, "y": 70, "order": "right-to-left", "stagger": 6, "after": "cleared", "delay": 20 }
+      ]
+    },
+    {
+      "name": "Left Flood",
+      "groups": [
+        { "kind": "static", "count": 11, "y": 70, "entry": "left", "order": "right-to-left", "stagger": 4 },
+        { "kind": "patrol", "count": 2, "x": 540, "y": 140, "spacing": 150, "entry": "left", "stagger": 12, "after": "spawned", "delay": 20 },
+        { "kind": "static", "count": 5, "formation": "v", "x": 560, "y": 170, "entry": "right", "stagger": 6, "after": "cleared", "delay": 15 }
+      ]
+    },
+    {
+      "name": "Arc",
+      "groups": [
+        { "kind": "static", "count": 9, "formation": "arc", "order": "center-out", "stagger": 4 },
+        { "kind": "patrol", "count": 2, "spacing": 520, "y": 170, "stagger": 10, "at": 45 },
+        { "kind": "static", "count": 6, "y": 170, "entry": "left", "order": "right-to-left", "stagger": 6, "after": "cleared", "delay": 15 }
+      ]
+    },
+    {
+      "name": "Holding Line",
+      "groups": [
+        { "kind": "static", "count": 8, "y": 50, "order": "left-to-right", "stagger": 5, "behavior": "hold", "release": 240 },
+        { "kind": "patrol", "count": 3, "spacing": 220, "y": 130, "entry": "right", "stagger": 12, "at": 60 },
+        { "kind": "static", "count": 6, "y": 130, "entry": "left", "order": "right-to-left", "stagger": 6, "after": "cleared", "delay": 15 }
+      ]
+    },
+    {
+      "name": "Pincer",
+      "groups": [
+        { "kind": "static", "count": 4, "formation": "column", "x": 120, "y": 60, "entry": "left", "stagger": 10, "behavior": "hold", "release": 240 },
+        { "kind": "static", "count": 4, "formation": "column", "x": 680, "y": 60, "entry": "right", "stagger": 10, "behavior": "hold", "release": 240 },
+        { "kind": "static", "count": 7, "formation": "v", "stagger": 5, "at": 60 }
+      ]
+    },
+    {
+      "name": "Crossing",
+      "groups": [
+        { "kind": "static", "count": 7, "y": 70, "entry": "left", "order": "right-to-left", "stagger": 6 },
+        { "kind": "static", "count": 7, "y": 120, "entry": "right", "order": "left-to-right", "stagger": 6 }
+      ]
+    }
+  ]
+}

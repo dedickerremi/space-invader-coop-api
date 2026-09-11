@@ -1,0 +1,62 @@
+{
+  "title": "Sector 3 — Pincer",
+  "fireRate": 1.2,
+  "waves": [
+    {
+      "name": "Pincer",
+      "groups": [
+        { "kind": "static", "count": 4, "formation": "column", "x": 120, "y": 60, "entry": "left", "stagger": 10, "behavior": "hold", "release": 240 },
+        { "kind": "static", "count": 4, "formation": "column", "x": 680, "y": 60, "entry": "right", "stagger": 10, "behavior": "hold", "release": 240, "after": "spawned", "delay": 20 },
+        { "kind": "static", "count": 4, "order": "left-to-right", "stagger": 8, "after": "spawned", "delay": 20 }
+      ]
+    },
+    {
+      "name": "Sweep",
+      "groups": [
+        { "kind": "patrol", "count": 3, "spacing": 160, "y": 50, "entry": "left", "stagger": 10, "behavior": "hold", "release": 210 },
+        { "kind": "static", "count": 6, "y": 110, "entry": "right", "order": "left-to-right", "stagger": 6, "at": 45 },
+        { "kind": "static", "count": 3, "y": 170, "order": "center-out", "stagger": 8, "after": "cleared", "delay": 15 }
+      ]
+    },
+    {
+      "name": "Twin V",
+      "groups": [
+        { "kind": "static", "count": 5, "formation": "v", "x": 240, "y": 70, "entry": "left", "stagger": 8, "behavior": "hold", "release": 210 },
+        { "kind": "static", "count": 5, "formation": "v", "x": 560, "y": 70, "entry": "right", "stagger": 8, "behavior": "hold", "release": 210, "after": "spawned", "delay": 10 },
+        { "kind": "patrol", "count": 2, "spacing": 100, "y": 170, "stagger": 12, "after": "cleared", "delay": 15 }
+      ]
+    },
+    {
+      "name": "Breather",
+      "groups": [
+        { "kind": "static", "count": 5, "y": 70, "order": "left-to-right", "stagger": 10 },
+        { "kind": "patrol", "count": 2, "spacing": 300, "y": 70, "stagger": 15, "after": "cleared", "delay": 30 }
+      ]
+    },
+    {
+      "name": "Converge",
+      "groups": [
+        { "kind": "static", "count": 5, "formation": "diagonal", "x": 240, "y": 60, "entry": "left", "stagger": 6 },
+        { "kind": "static", "count": 5, "formation": "diagonal", "mirror": true, "x": 560, "y": 60, "entry": "right", "stagger": 6 },
+        { "kind": "patrol", "count": 2, "spacing": 260, "y": 40, "stagger": 12, "behavior": "hold", "release": 150, "after": "cleared", "delay": 10 }
+      ]
+    },
+    {
+      "name": "Fortress",
+      "groups": [
+        { "kind": "static", "count": 8, "formation": "grid", "cols": 3, "spacing": 64, "y": 60, "order": "center-out", "stagger": 4, "behavior": "hold", "release": 270 },
+        { "kind": "patrol", "count": 2, "formation": "column", "x": 110, "y": 100, "entry": "left", "stagger": 12, "at": 60 },
+        { "kind": "patrol", "count": 2, "formation": "column", "x": 690, "y": 100, "entry": "right", "stagger": 12, "at": 60 }
+      ]
+    },
+    {
+      "name": "Last Line",
+      "groups": [
+        { "kind": "static", "count": 7, "y": 60, "entry": "left", "order": "right-to-left", "stagger": 6, "behavior": "hold", "release": 180 },
+        { "kind": "static", "count": 5, "y": 120, "entry": "right", "order": "left-to-right", "stagger": 6, "after": "spawned", "delay": 10 },
+        { "kind": "patrol", "count": 2, "spacing": 200, "y": 180, "stagger": 12, "after": "cleared", "delay": 15 }
+      ]
+    }
+  ],
+  "boss": { "kind": "warden", "hp": 34 }
+}

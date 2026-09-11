@@ -72,9 +72,9 @@ func SeedLevels(ctx context.Context) error {
 
 func seedLevelsDB(ctx context.Context, pool *pgxpool.Pool) error {
 	// Idempotent: insert every embedded level that isn't already in the DB.
-	// Existing rows are left untouched (admins may have edited them via the
-	// editor). Runs on every boot so newly added embedded levels land on
-	// the next deploy without manual import.
+	// Legacy rows are left untouched (admins may have edited them via the
+	// editor); campaign rows follow the repo. Runs on every boot so new and
+	// retuned embedded levels land on the next deploy without manual import.
 	entries, err := levelFiles.ReadDir("levels")
 	if err != nil {
 		return err
@@ -88,10 +88,19 @@ func seedLevelsDB(ctx context.Context, pool *pgxpool.Pool) error {
 		if err != nil {
 			return err
 		}
-		tag, err := pool.Exec(ctx,
-			`INSERT INTO levels (name, definition) VALUES ($1, $2::jsonb)
-			 ON CONFLICT (name) DO NOTHING`,
-			name, string(data))
+		// Campaign levels are tuned in the repo, so the repo wins: a changed
+		// file replaces the stored row on the next deploy. jsonb equality is
+		// semantic, so an unchanged level is not rewritten on every boot.
+		// Legacy levels keep the insert-only rule.
+		query := `INSERT INTO levels (name, definition) VALUES ($1, $2::jsonb)
+			 ON CONFLICT (name) DO NOTHING`
+		if isCampaignLevel(name) {
+			query = `INSERT INTO levels (name, definition) VALUES ($1, $2::jsonb)
+			 ON CONFLICT (name) DO UPDATE
+			   SET definition = EXCLUDED.definition, updated_at = now()
+			   WHERE levels.definition IS DISTINCT FROM EXCLUDED.definition`
+		}
+		tag, err := pool.Exec(ctx, query, name, string(data))
 		if err != nil {
 			return fmt.Errorf("seed %s: %w", name, err)
 		}
@@ -307,27 +316,71 @@ func CurrentLevelName() string {
 	return currentName
 }
 
-// FirstLevel returns the name of the first level in alphabetical order.
-// Used at match start to pick the initial level. Returns "" when no level
-// is available (caller should treat that as a fatal configuration error).
-func FirstLevel() string {
-	files, err := ListLevelFiles()
-	if err != nil || len(files) == 0 {
-		return ""
+// Solo and coop play separate campaigns. A campaign is every level whose
+// name starts with its prefix ("solo-level1.json", "coop-level1.json"),
+// played in alphabetical order. Levels without a campaign prefix are the
+// legacy shared set, still used as a fallback when a campaign is missing.
+func campaignPrefix(mode string) string {
+	if mode == "solo" {
+		return "solo-"
 	}
-	return files[0]
+	return "coop-"
 }
 
-// NextLevel returns the level name immediately after `current` in alphabetical
-// order, or "" when `current` is the last level (→ victory condition).
+func isCampaignLevel(name string) bool {
+	return strings.HasPrefix(name, "solo-") || strings.HasPrefix(name, "coop-")
+}
+
+// campaignOf returns the levels sharing name's campaign, in play order.
+func campaignOf(files []string, prefix string) []string {
+	var out []string
+	for _, f := range files {
+		if prefix == "" && !isCampaignLevel(f) || prefix != "" && strings.HasPrefix(f, prefix) {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// CampaignLevels returns the levels of the campaign played in mode, in play
+// order, falling back to the legacy shared set when the campaign is empty.
+func CampaignLevels(mode string) []string {
+	files, err := ListLevelFiles()
+	if err != nil {
+		return nil
+	}
+	if levels := campaignOf(files, campaignPrefix(mode)); len(levels) > 0 {
+		return levels
+	}
+	return campaignOf(files, "")
+}
+
+// FirstLevel returns the first level of the campaign played in mode. Returns
+// "" when no level is available (a fatal configuration error).
+func FirstLevel(mode string) string {
+	if levels := CampaignLevels(mode); len(levels) > 0 {
+		return levels[0]
+	}
+	return ""
+}
+
+// NextLevel returns the level after current within current's campaign, or ""
+// when current is the campaign's last level (→ victory condition).
 func NextLevel(current string) string {
 	files, err := ListLevelFiles()
 	if err != nil {
 		return ""
 	}
-	for i, f := range files {
-		if f == current && i+1 < len(files) {
-			return files[i+1]
+	prefix := ""
+	for _, p := range []string{"solo-", "coop-"} {
+		if strings.HasPrefix(current, p) {
+			prefix = p
+		}
+	}
+	levels := campaignOf(files, prefix)
+	for i, f := range levels {
+		if f == current && i+1 < len(levels) {
+			return levels[i+1]
 		}
 	}
 	return ""
