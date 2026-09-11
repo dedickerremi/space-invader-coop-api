@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"space-invaders-coop/backend-go/internal/types"
 )
 
 // A Session is a WebSocket credential minted before the socket opens. It is
@@ -16,11 +18,14 @@ import (
 // Sessions live in their own map with their own lock. Nothing here calls into
 // the match manager while holding sessMu, so the two locks never nest.
 type Session struct {
-	Token     string
-	PlayerID  string
-	MatchID   string // empty until the matchmaker assigns one (coop)
-	Mode      string
-	CreatedAt time.Time
+	Token    string
+	PlayerID string
+	MatchID  string // empty until the matchmaker assigns one (coop)
+	Mode     string
+	// Difficulty is the difficulty the player picked. A coop session is only
+	// paired with another at the same difficulty.
+	Difficulty string
+	CreatedAt  time.Time
 }
 
 // sessionTTL bounds how long an unused session is honoured. It only has to
@@ -45,9 +50,14 @@ func randomID(prefix string) (string, error) {
 // NewSession mints a credential for one player. mode must be "solo" or
 // "coop"; solo sessions get their match id immediately because there is
 // nobody to wait for, coop sessions get one from the matchmaker later.
-func NewSession(mode string) (*Session, error) {
+//
+// An unknown difficulty plays easy.
+func NewSession(mode, difficulty string) (*Session, error) {
 	if mode != "solo" && mode != "coop" {
 		mode = "coop"
+	}
+	if !types.IsDifficulty(difficulty) {
+		difficulty = types.DifficultyEasy
 	}
 
 	token, err := randomID("t_")
@@ -59,7 +69,7 @@ func NewSession(mode string) (*Session, error) {
 		return nil, err
 	}
 
-	s := &Session{Token: token, PlayerID: playerID, Mode: mode, CreatedAt: time.Now()}
+	s := &Session{Token: token, PlayerID: playerID, Mode: mode, Difficulty: difficulty, CreatedAt: time.Now()}
 	if mode == "solo" {
 		if s.MatchID, err = randomID("m_"); err != nil {
 			return nil, err

@@ -161,6 +161,7 @@ func deepCopyState(s *types.GameState) *types.GameState {
 		Kills:             kills,
 		LevelName:         s.LevelName,
 		LevelTitle:        s.LevelTitle,
+		Difficulty:        s.Difficulty,
 		WaveNumber:        s.WaveNumber,
 		WaveName:          s.WaveName,
 		TotalWaves:        s.TotalWaves,
@@ -205,7 +206,7 @@ func AddPlayer(matchID, playerID string) *types.Player {
 		Alive:      true,
 		Direction:  0,
 		DirectionY: 0,
-		Lives:      initialLives,
+		Lives:      difficultyOf(&m.State).Lives,
 		SpawnX:     x,
 		SpawnY:     playerY,
 	}
@@ -577,6 +578,8 @@ func tickWaveSpawning(s *types.GameState) {
 		s.WaveCarriers = make([]bool, len(wave.Carriers))
 	}
 
+	diff := difficultyOf(s)
+
 	// Groups start on a fixed tick or chain on the previous group. Each
 	// member then spawns Stagger ticks after the one before it, which is
 	// what turns a formation into a cascade.
@@ -596,7 +599,7 @@ func tickWaveSpawning(s *types.GameState) {
 		}
 
 		for p.Spawned < len(g.Slots) && s.WaveTick >= p.StartTick+p.Spawned*g.Stagger {
-			s.Enemies = append(s.Enemies, newGroupEnemy(g, gi+1, p.Spawned, level.FireRate))
+			s.Enemies = append(s.Enemies, newGroupEnemy(g, gi+1, p.Spawned, level.FireRate*diff.FireRate, diff.HoldTime))
 			p.Spawned++
 			alive[gi]++
 			if p.Spawned == len(g.Slots) {
@@ -661,8 +664,9 @@ const (
 )
 
 // newGroupEnemy creates member `member` of group g, placed at the start of
-// its entry path. fireRate scales how often it shoots.
-func newGroupEnemy(g *GroupDefinition, group, member int, fireRate float64) types.Enemy {
+// its entry path. fireRate scales how often it shoots, holdTime how long it
+// holds formation before diving.
+func newGroupEnemy(g *GroupDefinition, group, member int, fireRate, holdTime float64) types.Enemy {
 	slot := g.Slots[member]
 	e := types.Enemy{
 		X:            slot.X,
@@ -675,6 +679,9 @@ func newGroupEnemy(g *GroupDefinition, group, member int, fireRate float64) type
 		SlotY:        slot.Y,
 		Hold:         g.Hold,
 		ReleaseTimer: g.Release,
+	}
+	if g.Release > 0 && holdTime > 0 {
+		e.ReleaseTimer = max(1, round(float64(g.Release)*holdTime))
 	}
 	base := staticShootInterval
 	switch {
@@ -755,6 +762,7 @@ const (
 )
 
 func tickEnemyAI(s *types.GameState) {
+	dive := difficultyOf(s).DiveSpeed
 	for i := range s.Enemies {
 		e := &s.Enemies[i]
 
@@ -773,7 +781,7 @@ func tickEnemyAI(s *types.GameState) {
 			// Static drifts down silently — only patrol enemies and holding
 			// formations shoot, so the bullet volume stays readable.
 			if e.Diving {
-				e.Y += diveSpeed
+				e.Y += dive
 			} else {
 				e.Y += staticEnemySpeed
 			}
@@ -781,7 +789,7 @@ func tickEnemyAI(s *types.GameState) {
 		case "patrol":
 			vy := patrolEnemySpeed
 			if e.Diving {
-				vy = diveSpeed
+				vy = dive
 			}
 			patrolStep(s, e, vy)
 		}
@@ -1020,10 +1028,11 @@ func tickPlayerBullets(s *types.GameState) {
 
 func tickEnemyBullets(s *types.GameState) {
 	var remaining []types.EnemyBullet
+	speed := difficultyOf(s).BulletSpeed
 
 	for _, eb := range s.EnemyBullets {
-		eb.X += eb.DX
-		eb.Y += eb.DY
+		eb.X += eb.DX * speed
+		eb.Y += eb.DY * speed
 
 		// Off-screen?
 		if eb.Y > float64(gameHeight) || eb.X < 0 || eb.X > float64(gameWidth) {

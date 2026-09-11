@@ -12,7 +12,7 @@ import (
 	"space-invaders-coop/backend-go/internal/matchmaking"
 )
 
-// HandleQueue renders the matchmaking queue page: who holds the single queue
+// HandleQueue renders the matchmaking queue page: who holds each difficulty's
 // slot right now, lifetime outcome counters, and the recent transition log.
 func (s *Server) HandleQueue(w http.ResponseWriter, r *http.Request) {
 	snap := matchmaking.Snapshot()
@@ -77,16 +77,23 @@ func renderQueuePage(snap matchmaking.Status, now time.Time) string {
 
 	b.WriteString(`<div class="stats-grid">`)
 
-	// The queue slot itself. Showing the deadline countdown makes a stuck
-	// waiter obvious without reading logs.
-	if snap.Waiting != nil {
-		b.WriteString(statCard("Queue Slot", "Waiting", "#ffaa00",
-			`<span class="mono">`+html.EscapeString(snap.Waiting.PlayerID)+`</span><br>`+
-				`waiting `+formatMillis(snap.Waiting.WaitedMs)+
-				` · expires in `+formatMillis(snap.Waiting.RemainingMs)))
-	} else {
-		b.WriteString(statCard("Queue Slot", "Empty", "#666",
-			fmt.Sprintf("capacity 1 · %ds wait deadline", snap.TimeoutSeconds)))
+	// One slot per difficulty: players only pair with their own. Showing the
+	// deadline countdown makes a stuck waiter obvious without reading logs.
+	waitingAt := map[string]matchmaking.WaitingInfo{}
+	for _, w := range snap.Waiting {
+		waitingAt[w.Difficulty] = w
+	}
+	for _, d := range matchmaking.Difficulties {
+		title := strings.ToUpper(d[:1]) + d[1:] + " Slot"
+		if w, ok := waitingAt[d]; ok {
+			b.WriteString(statCard(title, "Waiting", "#ffaa00",
+				`<span class="mono">`+html.EscapeString(w.PlayerID)+`</span><br>`+
+					`waiting `+formatMillis(w.WaitedMs)+
+					` · expires in `+formatMillis(w.RemainingMs)))
+		} else {
+			b.WriteString(statCard(title, "Empty", "#666",
+				fmt.Sprintf("%ds wait deadline", snap.TimeoutSeconds)))
+		}
 	}
 
 	c := snap.Counters
@@ -155,14 +162,20 @@ func renderQueuePage(snap matchmaking.Status, now time.Time) string {
 	b.WriteString(`</div>`)
 
 	// A waiter sitting near the full deadline is the shape of "nobody else is
-	// online", which is worth distinguishing from a queue that is broken.
-	if snap.Waiting != nil && snap.Waiting.WaitedMs > 10000 {
-		fmt.Fprintf(&b, `<div class="banner"><strong>%s has been waiting %s.</strong> `+
-			`With a single-slot queue that just means no second player has arrived yet — `+
-			`they will get QUEUE_TIMEOUT in %s.</div>`,
-			html.EscapeString(snap.Waiting.PlayerID),
-			formatMillis(snap.Waiting.WaitedMs),
-			formatMillis(snap.Waiting.RemainingMs))
+	// online at that difficulty", which is worth distinguishing from a queue
+	// that is broken — and two slots waiting at once means two players who
+	// could have played together but picked different difficulties.
+	for _, w := range snap.Waiting {
+		if w.WaitedMs > 10000 {
+			fmt.Fprintf(&b, `<div class="banner"><strong>%s has been waiting %s on %s.</strong> `+
+				`No second player has picked %s yet — they will get QUEUE_TIMEOUT in %s.</div>`,
+				html.EscapeString(w.PlayerID), formatMillis(w.WaitedMs), w.Difficulty,
+				w.Difficulty, formatMillis(w.RemainingMs))
+		}
+	}
+	if len(snap.Waiting) > 1 {
+		fmt.Fprintf(&b, `<div class="banner"><strong>%d players are waiting on different difficulties.</strong> `+
+			`They would be playing together with a shared queue.</div>`, len(snap.Waiting))
 	}
 
 	b.WriteString(`<form class="filters" onsubmit="return false">
@@ -173,11 +186,11 @@ func renderQueuePage(snap matchmaking.Status, now time.Time) string {
 </form>`)
 
 	b.WriteString(`<table><thead><tr>
-  <th>Time (UTC)</th><th>Age</th><th>Event</th><th>Player</th><th>Match</th><th>Waited</th><th>Detail</th>
+  <th>Time (UTC)</th><th>Age</th><th>Event</th><th>Difficulty</th><th>Player</th><th>Match</th><th>Waited</th><th>Detail</th>
 </tr></thead><tbody>`)
 
 	if len(snap.Events) == 0 {
-		b.WriteString(`<tr><td colspan="7" class="empty">No queue activity since boot.</td></tr>`)
+		b.WriteString(`<tr><td colspan="8" class="empty">No queue activity since boot.</td></tr>`)
 	}
 	for _, e := range snap.Events {
 		waited := "—"
@@ -200,6 +213,7 @@ func renderQueuePage(snap matchmaking.Status, now time.Time) string {
   <td class="mono">%s</td>
   <td style="color:#666">%s ago</td>
   <td><span class="badge" style="background:%s;color:#000">%s</span></td>
+  <td>%s</td>
   <td class="mono">%s</td>
   <td class="mono">%s</td>
   <td>%s</td>
@@ -209,6 +223,7 @@ func renderQueuePage(snap matchmaking.Status, now time.Time) string {
 			formatMillis(age.Milliseconds()),
 			queueEventColor(e.Kind),
 			html.EscapeString(string(e.Kind)),
+			html.EscapeString(orDash(e.Difficulty)),
 			html.EscapeString(e.PlayerID),
 			matchID,
 			waited,
@@ -232,4 +247,11 @@ func renderQueuePage(snap matchmaking.Status, now time.Time) string {
 </script>`)
 
 	return b.String()
+}
+
+func orDash(s string) string {
+	if s == "" {
+		return "—"
+	}
+	return s
 }

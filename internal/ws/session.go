@@ -18,14 +18,16 @@ import (
 var sessionLimiter = ratelimit.New(30, time.Minute)
 
 type sessionRequest struct {
-	Mode string `json:"mode"`
+	Mode       string `json:"mode"`
+	Difficulty string `json:"difficulty"` // easy | medium | hard (default easy)
 }
 
 type sessionResponse struct {
-	Token    string `json:"token"`
-	PlayerID string `json:"playerId"`
-	MatchID  string `json:"matchId,omitempty"`
-	Mode     string `json:"mode"`
+	Token      string `json:"token"`
+	PlayerID   string `json:"playerId"`
+	MatchID    string `json:"matchId,omitempty"`
+	Mode       string `json:"mode"`
+	Difficulty string `json:"difficulty,omitempty"`
 }
 
 // HandleSession mints a WebSocket credential. The client never chooses its own
@@ -50,19 +52,20 @@ func (s *Server) HandleSession(w http.ResponseWriter, r *http.Request) {
 	// A missing or unparseable body is fine; mode defaults to coop.
 	_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<10)).Decode(&req)
 
-	sess, err := match.NewSession(req.Mode)
+	sess, err := match.NewSession(req.Mode, req.Difficulty)
 	if err != nil {
 		fmt.Printf("[SESSION] Mint failed: %v\n", err)
 		http.Error(w, "could not create session", http.StatusInternalServerError)
 		return
 	}
 
-	fmt.Printf("[SESSION] Minted %s for mode=%s\n", sess.PlayerID, sess.Mode)
+	fmt.Printf("[SESSION] Minted %s for mode=%s difficulty=%q\n", sess.PlayerID, sess.Mode, sess.Difficulty)
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(sessionResponse{
-		Token:    sess.Token,
-		PlayerID: sess.PlayerID,
-		MatchID:  sess.MatchID,
-		Mode:     sess.Mode,
+		Token:      sess.Token,
+		PlayerID:   sess.PlayerID,
+		MatchID:    sess.MatchID,
+		Mode:       sess.Mode,
+		Difficulty: sess.Difficulty,
 	})
 }
