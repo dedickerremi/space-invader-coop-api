@@ -2,7 +2,6 @@ package game
 
 import (
 	"math"
-	"math/rand"
 
 	"space-invaders-coop/backend-go/internal/types"
 )
@@ -28,25 +27,27 @@ const (
 // bossStats holds the per-kind tunable stats. Adding a new boss kind = add
 // a case here + a tick handler below.
 type bossStats struct {
-	maxHP         int
-	pointsOnKill  int
-	hitboxW       int
-	hitboxH       int
-	powerUpDrops  int // guaranteed power-ups spawned when killed
+	maxHP        int
+	pointsOnKill int
+	hitboxW      int
+	hitboxH      int
 }
+
+// bossDrops is what every boss releases when it dies.
+var bossDrops = []string{"extra_life", "shield"}
 
 func statsFor(kind string) bossStats {
 	switch kind {
 	case BossSentinel:
-		return bossStats{maxHP: 30, pointsOnKill: 2000, hitboxW: 80, hitboxH: 60, powerUpDrops: 2}
+		return bossStats{maxHP: 30, pointsOnKill: 2000, hitboxW: 80, hitboxH: 60}
 	case BossWarden:
-		return bossStats{maxHP: 50, pointsOnKill: 3000, hitboxW: 100, hitboxH: 70, powerUpDrops: 3}
+		return bossStats{maxHP: 50, pointsOnKill: 3000, hitboxW: 100, hitboxH: 70}
 	case BossCitadel:
-		return bossStats{maxHP: 80, pointsOnKill: 4000, hitboxW: 110, hitboxH: 80, powerUpDrops: 3}
+		return bossStats{maxHP: 80, pointsOnKill: 4000, hitboxW: 110, hitboxH: 80}
 	case BossNexus:
-		return bossStats{maxHP: 120, pointsOnKill: 5000, hitboxW: 130, hitboxH: 90, powerUpDrops: 4}
+		return bossStats{maxHP: 120, pointsOnKill: 5000, hitboxW: 130, hitboxH: 90}
 	}
-	return bossStats{maxHP: 30, pointsOnKill: 1000, hitboxW: 80, hitboxH: 60, powerUpDrops: 1}
+	return bossStats{maxHP: 30, pointsOnKill: 1000, hitboxW: 80, hitboxH: 60}
 }
 
 // --- Spawn & naming ---
@@ -627,19 +628,9 @@ func onBossKilled(s *types.GameState, killerID string) {
 		}
 	}
 
-	// Guaranteed drops — always include an extra_life, then fill with
-	// impactful boosts.
-	pool := []string{"extra_life", "shield", "double_shot", "speed_boost"}
-	for i := 0; i < stats.powerUpDrops; i++ {
-		var kind string
-		if i == 0 {
-			kind = "extra_life"
-		} else {
-			kind = pool[rand.Intn(len(pool))]
-		}
-		s.PowerUps = append(s.PowerUps, types.PowerUp{
-			X: bx + (i-stats.powerUpDrops/2)*40, Y: by, Kind: kind,
-		})
+	// Guaranteed drops: a life and a fresh shield before the next sector.
+	for i, kind := range bossDrops {
+		spawnPowerUp(s, bx+(i*2-len(bossDrops)+1)*20, by, kind)
 	}
 
 	s.BossesKilled = append(s.BossesKilled, s.Boss.Kind)

@@ -14,9 +14,9 @@ type Player struct {
 	DirectionY      int    `json:"directionY"`      // -1 forward (up), 0 stopped, 1 backward (down)
 	Lives           int    `json:"lives"`           // individual lives
 	InvincibleTimer int    `json:"invincibleTimer"` // ticks of invincibility after respawn (0 = vulnerable)
-	DoubleShotTimer int    `json:"doubleShotTimer"` // ticks of double-shot power-up remaining
-	SpeedBoostTimer int    `json:"speedBoostTimer"` // ticks of speed-boost power-up remaining
-	ShieldTimer     int    `json:"shieldTimer"`     // ticks of shield power-up remaining
+	DoubleShot      bool   `json:"doubleShot"`      // kept until the player loses a life
+	SpeedBoost      bool   `json:"speedBoost"`      // kept until the player loses a life
+	ShieldCharges   int    `json:"shieldCharges"`   // hits the shield still absorbs (0 = no shield)
 	SpawnX          int    `json:"-"`               // starting X for respawn
 	SpawnY          int    `json:"-"`               // starting Y for respawn
 }
@@ -91,6 +91,24 @@ type GroupProgress struct {
 	SpawnedAt int // wave tick the last member spawned on
 	Cleared   bool
 	ClearedAt int // wave tick the group was first seen fully destroyed
+}
+
+// Carrier is a bonus carrier: an asteroid or the goblin's courier ship. It
+// never shoots or hurts anyone; shooting it down releases the bonus it
+// carries, and it takes that bonus with it if it leaves the screen.
+type Carrier struct {
+	Kind string `json:"kind"` // "asteroid" | "courier"
+	X    int    `json:"x"`
+	Y    int    `json:"y"`
+	HP   int    `json:"hp"`
+	Drop string `json:"drop"` // power-up kind it releases, so the client can show it
+
+	FX    float64 `json:"-"` // sub-pixel position
+	FY    float64 `json:"-"`
+	VX    float64 `json:"-"` // px/tick
+	VY    float64 `json:"-"`
+	BaseY float64 `json:"-"` // courier cruising altitude it bobs around
+	Age   int     `json:"-"` // ticks since launch
 }
 
 // PlayerScore is one player's score in the game-over summary.
@@ -171,6 +189,7 @@ type GameState struct {
 	Enemies           []Enemy          `json:"enemies"`
 	Sparks            []Spark          `json:"sparks"`
 	PowerUps          []PowerUp        `json:"powerUps"`
+	Carriers          []Carrier        `json:"carriers"`
 	KillStreaks       map[string]int   `json:"killStreaks"`
 	Lives             int              `json:"lives"`
 	Points            map[string]int   `json:"points"` // playerId -> points
@@ -198,6 +217,7 @@ type GameState struct {
 	BossDefeated bool            `json:"-"` // true once the current level's boss has been killed
 	BossesKilled []string        `json:"-"` // boss kinds defeated this match, for stats
 	WaveGroups   []GroupProgress `json:"-"` // per-group spawn progress for the current wave
+	WaveCarriers []bool          `json:"-"` // which of the current wave's carriers have launched
 }
 
 // Match holds match metadata and game state.

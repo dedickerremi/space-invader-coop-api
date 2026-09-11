@@ -75,18 +75,22 @@ const (
 	// Player respawn
 	invincibleTicks = 90           // 3s invincibility after instant respawn
 
-	// Power-ups
-	doubleShotDurationTicks = 300 // 10s at 30Hz
-	speedBoostDurationTicks = 300 // 10s
-	shieldDurationTicks     = 150 // 5s
-	pointsBonusValue        = 500
-	powerUpFallSpeed        = 2   // px per tick
-	powerUpDropStaticPct    = 10  // % chance on static kill
-	powerUpDropPatrolPct    = 20  // % chance on patrol kill
-	killStreakThreshold     = 5   // every N kills -> guaranteed drop
+	// Power-ups. Bonuses are rare and last: double shot and speed stay until
+	// the player loses a life, the shield until it has absorbed its hits.
+	// Most arrive on scripted carriers; enemies only drop the odd small one.
+	pointsBonusValue    = 500
+	powerUpFallSpeed    = 2  // px per tick
+	powerUpDropPct      = 5  // % chance an enemy drops a small bonus when killed
+	shieldMaxCharges    = 3  // hits a fresh shield absorbs
+	shieldHitGraceTicks = 15 // brief invulnerability after the shield absorbs a hit, so one volley can't drain it
 )
 
+// powerUpKinds lists every bonus a level may script onto a carrier.
 var powerUpKinds = []string{"extra_life", "double_shot", "speed_boost", "shield", "points_bonus"}
+
+// smallBonuses is what enemies drop at random and what an asteroid carries
+// when the level doesn't say. Firepower and lives are never random.
+var smallBonuses = []string{"points_bonus", "points_bonus", "speed_boost", "shield"}
 
 // GetState returns a deep copy of the game state for a match, or nil.
 func GetState(matchID string) *types.GameState {
@@ -113,6 +117,8 @@ func deepCopyState(s *types.GameState) *types.GameState {
 	copy(sparks, s.Sparks)
 	powerUps := make([]types.PowerUp, len(s.PowerUps))
 	copy(powerUps, s.PowerUps)
+	carriers := make([]types.Carrier, len(s.Carriers))
+	copy(carriers, s.Carriers)
 	points := make(map[string]int)
 	for k, v := range s.Points {
 		points[k] = v
@@ -148,6 +154,7 @@ func deepCopyState(s *types.GameState) *types.GameState {
 		Enemies:           enemies,
 		Sparks:            sparks,
 		PowerUps:          powerUps,
+		Carriers:          carriers,
 		KillStreaks:       killStreaks,
 		Lives:             s.Lives,
 		Points:            points,
@@ -339,7 +346,7 @@ func PlayerShoot(matchID, playerID string) {
 		if m.State.Players[i].ID == playerID && m.State.Players[i].Alive {
 			px = m.State.Players[i].X
 			py = m.State.Players[i].Y
-			doubleShot = m.State.Players[i].DoubleShotTimer > 0
+			doubleShot = m.State.Players[i].DoubleShot
 			break
 		}
 	}
@@ -412,16 +419,13 @@ func Tick(matchID string) {
 	// --- Player invincibility window ---
 	tickInvincibility(s)
 
-	// --- Power-up effect timers ---
-	tickPowerUpTimers(s)
-
 	// --- Player movement ---
 	for i := range s.Players {
 		if !s.Players[i].Alive {
 			continue
 		}
 		speed := playerSpeed
-		if s.Players[i].SpeedBoostTimer > 0 {
+		if s.Players[i].SpeedBoost {
 			speed = playerSpeed * 3 / 2 // 1.5x
 		}
 		s.Players[i].X += s.Players[i].Direction * speed
@@ -432,6 +436,9 @@ func Tick(matchID string) {
 
 	// --- Enemy AI (movement + shooting) ---
 	tickEnemyAI(s)
+
+	// --- Bonus carriers drift across the screen ---
+	tickCarriers(s)
 
 	// --- Boss AI (movement + attacks) ---
 	tickBoss(s)
@@ -445,6 +452,9 @@ func Tick(matchID string) {
 	// --- Player bullets vs boss (before the enemy sweep so the bullet is
 	//     consumed by the boss if it hits, rather than falling through) ---
 	tickBossCollision(s)
+
+	// --- Player bullets vs bonus carriers ---
+	tickCarrierHits(s)
 
 	// --- Move player bullets + check collisions ---
 	tickPlayerBullets(s)
@@ -562,8 +572,9 @@ func tickWaveSpawning(s *types.GameState) {
 	}
 	wave := &level.Waves[waveIdx]
 
-	if s.WaveTick == 0 || len(s.WaveGroups) != len(wave.Groups) {
+	if s.WaveTick == 0 || len(s.WaveGroups) != len(wave.Groups) || len(s.WaveCarriers) != len(wave.Carriers) {
 		s.WaveGroups = make([]types.GroupProgress, len(wave.Groups))
+		s.WaveCarriers = make([]bool, len(wave.Carriers))
 	}
 
 	// Groups start on a fixed tick or chain on the previous group. Each
@@ -600,6 +611,8 @@ func tickWaveSpawning(s *types.GameState) {
 			p.ClearedAt = s.WaveTick
 		}
 	}
+
+	launchCarriers(s, wave)
 
 	s.WaveTick++
 
@@ -1026,12 +1039,7 @@ func tickEnemyBullets(s *types.GameState) {
 			px := s.Players[pi].X
 			if enemyBulletHitPlayer(eb.X, eb.Y, float64(px), float64(s.Players[pi].Y)) {
 				hitPlayer = true
-				if s.Players[pi].ShieldTimer > 0 {
-					// Shield absorbs the hit and drops.
-					s.Players[pi].ShieldTimer = 0
-				} else {
-					killPlayer(s, &s.Players[pi])
-				}
+				hurtPlayer(s, &s.Players[pi])
 				break
 			}
 		}
@@ -1062,11 +1070,7 @@ func tickEnemyPlayerCollision(s *types.GameState) {
 			}
 			if enemyHitPlayer(e.X, e.Y, s.Players[pi].X, s.Players[pi].Y) {
 				hitPlayer = true
-				if s.Players[pi].ShieldTimer > 0 {
-					s.Players[pi].ShieldTimer = 0
-				} else {
-					killPlayer(s, &s.Players[pi])
-				}
+				hurtPlayer(s, &s.Players[pi])
 				break
 			}
 		}
@@ -1079,16 +1083,27 @@ func tickEnemyPlayerCollision(s *types.GameState) {
 
 // --- Player damage & respawn ---
 
-// killPlayer handles a player taking a hit: lose a life, clear power-ups +
-// streak. If the player has lives left, they respawn instantly at their
+// hurtPlayer applies one hit to p. A shield absorbs it and loses a charge,
+// with a short grace so a single volley can't strip every charge at once;
+// without one, the player loses a life.
+func hurtPlayer(s *types.GameState, p *types.Player) {
+	if p.ShieldCharges > 0 {
+		p.ShieldCharges--
+		p.InvincibleTimer = max(p.InvincibleTimer, shieldHitGraceTicks)
+		return
+	}
+	killPlayer(s, p)
+}
+
+// killPlayer handles a player losing a life: clear power-ups + streak. If the player has lives left, they respawn instantly at their
 // starting position with a temporary invincibility window.
 func killPlayer(s *types.GameState, p *types.Player) {
 	p.Lives--
 	p.Direction = 0
 	p.DirectionY = 0
-	p.DoubleShotTimer = 0
-	p.SpeedBoostTimer = 0
-	p.ShieldTimer = 0
+	p.DoubleShot = false
+	p.SpeedBoost = false
+	p.ShieldCharges = 0
 	if s.KillStreaks != nil {
 		s.KillStreaks[p.ID] = 0
 	}
@@ -1118,7 +1133,7 @@ func damageRandomPlayer(s *types.GameState) {
 		return
 	}
 	target := alive[rand.Intn(len(alive))]
-	killPlayer(s, target)
+	hurtPlayer(s, target)
 }
 
 // tickInvincibility decrements each player's invincibility timer. Respawn
@@ -1134,38 +1149,22 @@ func tickInvincibility(s *types.GameState) {
 
 // --- Power-ups ---
 
-// maybeDropPowerUp decides whether to drop a power-up when an enemy is killed.
-// Base chance depends on enemy type; a guaranteed drop triggers on kill-streak milestones.
+// maybeDropPowerUp gives a killed enemy a small chance to drop a small
+// bonus. Kill streaks no longer guarantee drops: bonuses are meant to be
+// rare, and the strong ones are placed in the levels on carriers.
 func maybeDropPowerUp(s *types.GameState, e types.Enemy, ownerID string) {
-	streak := 0
-	if s.KillStreaks != nil {
-		streak = s.KillStreaks[ownerID]
+	if rand.Intn(100) >= powerUpDropPct {
+		return
 	}
-	guaranteed := streak > 0 && streak%killStreakThreshold == 0
-
-	if !guaranteed {
-		chance := powerUpDropStaticPct
-		if e.Type == "patrol" {
-			chance = powerUpDropPatrolPct
-		}
-		if rand.Intn(100) >= chance {
-			return
-		}
-	}
-	spawnPowerUp(s, e.X, e.Y, guaranteed)
+	spawnPowerUp(s, e.X, e.Y, randomSmallBonus())
 }
 
-// spawnPowerUp adds a power-up at the given position. If guaranteed is true,
-// the pool is weighted toward more impactful bonuses (shield / double_shot).
-func spawnPowerUp(s *types.GameState, x, y int, guaranteed bool) {
-	var kind string
-	if guaranteed {
-		// Streak reward: weighted pool favoring strong effects.
-		pool := []string{"shield", "shield", "double_shot", "double_shot", "extra_life", "speed_boost", "points_bonus"}
-		kind = pool[rand.Intn(len(pool))]
-	} else {
-		kind = powerUpKinds[rand.Intn(len(powerUpKinds))]
-	}
+func randomSmallBonus() string {
+	return smallBonuses[rand.Intn(len(smallBonuses))]
+}
+
+// spawnPowerUp adds a falling power-up of the given kind.
+func spawnPowerUp(s *types.GameState, x, y int, kind string) {
 	s.PowerUps = append(s.PowerUps, types.PowerUp{X: x, Y: y, Kind: kind})
 }
 
@@ -1211,30 +1210,21 @@ func applyPowerUp(s *types.GameState, p *types.Player, kind string) {
 	case "extra_life":
 		p.Lives++
 	case "double_shot":
-		p.DoubleShotTimer = doubleShotDurationTicks
+		// Already firing double: the pickup still pays out.
+		if p.DoubleShot && s.Points != nil {
+			s.Points[p.ID] += pointsBonusValue
+		}
+		p.DoubleShot = true
 	case "speed_boost":
-		p.SpeedBoostTimer = speedBoostDurationTicks
+		if p.SpeedBoost && s.Points != nil {
+			s.Points[p.ID] += pointsBonusValue
+		}
+		p.SpeedBoost = true
 	case "shield":
-		p.ShieldTimer = shieldDurationTicks
+		p.ShieldCharges = shieldMaxCharges // a new shield tops the old one back up
 	case "points_bonus":
 		if s.Points != nil {
 			s.Points[p.ID] += pointsBonusValue
-		}
-	}
-}
-
-// tickPowerUpTimers decrements active power-up timers on each player.
-func tickPowerUpTimers(s *types.GameState) {
-	for i := range s.Players {
-		p := &s.Players[i]
-		if p.DoubleShotTimer > 0 {
-			p.DoubleShotTimer--
-		}
-		if p.SpeedBoostTimer > 0 {
-			p.SpeedBoostTimer--
-		}
-		if p.ShieldTimer > 0 {
-			p.ShieldTimer--
 		}
 	}
 }

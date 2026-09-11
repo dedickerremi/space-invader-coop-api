@@ -71,6 +71,17 @@ func printLevel(name string, def *game.LevelDefinition) {
 			fmt.Printf("       %2d %-6s %-8s %-6s %-22s %s\n",
 				len(g.Slots), g.Kind, g.Formation, g.Entry, behavior(g), timing(g))
 		}
+		for _, c := range w.Carriers {
+			drop, from := c.Drop, c.From
+			if drop == "" {
+				drop = "random small bonus"
+			}
+			if from == "" {
+				from = "random side"
+			}
+			fmt.Printf("        + %-8s from %-11s carrying %-18s %.1fs after group %d starts\n",
+				c.Kind, from, drop, float64(c.Delay)/30, c.Group)
+		}
 	}
 }
 

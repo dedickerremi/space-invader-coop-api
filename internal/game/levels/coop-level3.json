@@ -8,6 +8,9 @@
         { "kind": "static", "count": 5, "formation": "column", "x": 130, "y": 50, "entry": "left", "stagger": 8, "behavior": "hold", "release": 240 },
         { "kind": "static", "count": 5, "formation": "column", "x": 670, "y": 50, "entry": "right", "stagger": 8, "behavior": "hold", "release": 240 },
         { "kind": "static", "count": 6, "order": "center-out", "stagger": 6, "at": 60 }
+      ],
+      "carriers": [
+        { "kind": "asteroid", "group": 3 }
       ]
     },
     {
@@ -24,6 +27,9 @@
         { "kind": "static", "count": 12, "formation": "grid", "cols": 4, "spacing": 60, "x": 250, "y": 50, "entry": "left", "stagger": 4, "behavior": "hold", "release": 210 },
         { "kind": "static", "count": 5, "x": 560, "y": 100, "entry": "left", "order": "right-to-left", "stagger": 6, "at": 60 },
         { "kind": "patrol", "count": 2, "x": 600, "y": 200, "spacing": 140, "entry": "left", "stagger": 12, "after": "cleared", "delay": 15 }
+      ],
+      "carriers": [
+        { "kind": "courier", "delay": 45 }
       ]
     },
     {
@@ -31,6 +37,9 @@
       "groups": [
         { "kind": "static", "count": 7, "y": 70, "order": "left-to-right", "stagger": 8 },
         { "kind": "patrol", "count": 2, "spacing": 300, "y": 70, "stagger": 15, "after": "cleared", "delay": 30 }
+      ],
+      "carriers": [
+        { "kind": "asteroid", "delay": 30, "drop": "shield" }
       ]
     },
     {
@@ -48,6 +57,9 @@
         { "kind": "static", "count": 12, "formation": "grid", "cols": 4, "spacing": 64, "y": 50, "order": "center-out", "stagger": 3, "behavior": "hold", "release": 300 },
         { "kind": "patrol", "count": 2, "formation": "column", "x": 110, "y": 110, "entry": "left", "stagger": 12, "at": 60 },
         { "kind": "patrol", "count": 2, "formation": "column", "x": 690, "y": 110, "entry": "right", "stagger": 12, "at": 60 }
+      ],
+      "carriers": [
+        { "kind": "courier", "delay": 30 }
       ]
     },
     {
