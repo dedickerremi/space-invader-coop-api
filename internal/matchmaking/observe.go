@@ -37,12 +37,13 @@ const (
 
 // Event is one queue transition.
 type Event struct {
-	At       time.Time `json:"at"`
-	Kind     EventKind `json:"kind"`
-	PlayerID string    `json:"playerId"`
-	MatchID  string    `json:"matchId,omitempty"`
-	WaitedMs int64     `json:"waitedMs"`
-	Note     string    `json:"note,omitempty"`
+	At         time.Time `json:"at"`
+	Kind       EventKind `json:"kind"`
+	PlayerID   string    `json:"playerId"`
+	Difficulty string    `json:"difficulty,omitempty"`
+	MatchID    string    `json:"matchId,omitempty"`
+	WaitedMs   int64     `json:"waitedMs"`
+	Note       string    `json:"note,omitempty"`
 }
 
 // Counters are lifetime totals since process start.
@@ -72,22 +73,23 @@ type WaitStats struct {
 	Samples int64 `json:"samples"`
 }
 
-// WaitingInfo describes the player currently holding the queue slot.
+// WaitingInfo describes the player holding one difficulty's slot.
 type WaitingInfo struct {
-	PlayerID string    `json:"playerId"`
-	Since    time.Time `json:"since"`
-	WaitedMs int64     `json:"waitedMs"`
+	Difficulty string    `json:"difficulty"`
+	PlayerID   string    `json:"playerId"`
+	Since      time.Time `json:"since"`
+	WaitedMs   int64     `json:"waitedMs"`
 	// RemainingMs is how long until this player's wait deadline expires.
 	RemainingMs int64 `json:"remainingMs"`
 }
 
 // Status is the full queue state for the admin page and /api/queue.
 type Status struct {
-	Waiting        *WaitingInfo `json:"waiting"`
-	Counters       Counters     `json:"counters"`
-	Wait           WaitStats    `json:"wait"`
-	Events         []Event      `json:"events"` // newest first
-	TimeoutSeconds int          `json:"timeoutSeconds"`
+	Waiting        []WaitingInfo `json:"waiting"` // occupied slots, easy → hard
+	Counters       Counters      `json:"counters"`
+	Wait           WaitStats     `json:"wait"`
+	Events         []Event       `json:"events"` // newest first
+	TimeoutSeconds int           `json:"timeoutSeconds"`
 }
 
 var (
@@ -142,19 +144,21 @@ func Snapshot() Status {
 		s.Wait.AvgMs = waitSumMs / waitCount
 	}
 
-	if waiting != nil {
-		now := time.Now()
-		waited := now.Sub(waiting.since).Milliseconds()
-		remaining := QueueTimeout.Milliseconds() - waited
-		if remaining < 0 {
-			remaining = 0
+	now := time.Now()
+	s.Waiting = []WaitingInfo{}
+	for _, d := range Difficulties {
+		w := waiting[d]
+		if w == nil {
+			continue
 		}
-		s.Waiting = &WaitingInfo{
-			PlayerID:    waiting.playerID,
-			Since:       waiting.since,
+		waited := now.Sub(w.since).Milliseconds()
+		s.Waiting = append(s.Waiting, WaitingInfo{
+			Difficulty:  d,
+			PlayerID:    w.playerID,
+			Since:       w.since,
 			WaitedMs:    waited,
-			RemainingMs: remaining,
-		}
+			RemainingMs: max(0, QueueTimeout.Milliseconds()-waited),
+		})
 	}
 
 	s.Events = make([]Event, 0, len(events))

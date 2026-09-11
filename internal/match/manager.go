@@ -76,8 +76,9 @@ func GetActiveMatchCount() int {
 // rather than off the wire. That is what stops a client from conjuring a
 // match id or joining someone else's.
 //
-// mode should be "solo" or "coop" (defaults to "coop" if empty).
-func JoinMatch(matchID, playerID, mode string) bool {
+// mode should be "solo" or "coop" (defaults to "coop" if empty). difficulty
+// is fixed when the match is created; later joiners don't change it.
+func JoinMatch(matchID, playerID, mode, difficulty string) bool {
 	if mode == "" {
 		mode = "coop"
 	}
@@ -90,14 +91,16 @@ func JoinMatch(matchID, playerID, mode string) bool {
 			return false
 		}
 		m := &types.Match{
-			MatchID:   matchID,
-			PlayerIDs: nil,
-			State:     createInitialState(),
-			CreatedAt: time.Now().UnixMilli(),
-			Mode:      mode,
+			MatchID:    matchID,
+			PlayerIDs:  nil,
+			State:      createInitialState(),
+			CreatedAt:  time.Now().UnixMilli(),
+			Mode:       mode,
+			Difficulty: difficulty,
 		}
+		m.State.Difficulty = difficulty
 		matches[matchID] = m
-		fmt.Printf("[MATCH] Created %s (mode=%s)\n", matchID, mode)
+		fmt.Printf("[MATCH] Created %s (mode=%s difficulty=%q)\n", matchID, mode, difficulty)
 	}
 
 	m := matches[matchID]
@@ -259,6 +262,7 @@ func buildSnapshotLocked(m *types.Match, outcome string) *types.MatchSnapshot {
 	return &types.MatchSnapshot{
 		MatchID:      m.MatchID,
 		Mode:         m.Mode,
+		Difficulty:   m.Difficulty,
 		Outcome:      outcome,
 		StartedAt:    m.CreatedAt,
 		EndedAt:      time.Now().UnixMilli(),

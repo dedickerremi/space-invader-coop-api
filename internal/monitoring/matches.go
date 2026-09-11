@@ -13,11 +13,13 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"space-invaders-coop/backend-go/internal/db"
+	"space-invaders-coop/backend-go/internal/types"
 )
 
 type matchRow struct {
 	ID           string
 	Mode         string
+	Difficulty   string
 	LevelName    string
 	WaveReached  int
 	Duration     int
@@ -51,6 +53,7 @@ func (s *Server) HandleMatchesList(w http.ResponseWriter, r *http.Request) {
 
 	outcomeFilter := r.URL.Query().Get("outcome")
 	modeFilter := r.URL.Query().Get("mode")
+	difficultyFilter := r.URL.Query().Get("difficulty")
 	limit := 50
 	if n, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && n > 0 && n <= 500 {
 		limit = n
@@ -59,9 +62,9 @@ func (s *Server) HandleMatchesList(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 
-	where, args := buildMatchesFilter(outcomeFilter, modeFilter)
+	where, args := buildMatchesFilter(outcomeFilter, modeFilter, difficultyFilter)
 	rows, err := pool.Query(ctx, `
-		SELECT id, mode, COALESCE(level_name, ''), wave_reached, duration_seconds,
+		SELECT id, mode, COALESCE(difficulty, ''), COALESCE(level_name, ''), wave_reached, duration_seconds,
 		       COALESCE(outcome, ''), COALESCE(country, ''), COALESCE(platform, ''),
 		       COALESCE(user_agent, ''), COALESCE(bosses_killed, '{}'), ended_at
 		FROM match_summaries
@@ -81,7 +84,7 @@ func (s *Server) HandleMatchesList(w http.ResponseWriter, r *http.Request) {
 	var list []matchRow
 	for rows.Next() {
 		var m matchRow
-		if err := rows.Scan(&m.ID, &m.Mode, &m.LevelName, &m.WaveReached, &m.Duration,
+		if err := rows.Scan(&m.ID, &m.Mode, &m.Difficulty, &m.LevelName, &m.WaveReached, &m.Duration,
 			&m.Outcome, &m.Country, &m.Platform, &m.UserAgent, &m.BossesKilled, &m.EndedAt); err != nil {
 			continue
 		}
@@ -97,10 +100,10 @@ func (s *Server) HandleMatchesList(w http.ResponseWriter, r *http.Request) {
 		list[i].Participants = partByMatch[list[i].ID]
 	}
 
-	fmt.Fprint(w, matchesPageShell("Matches", renderMatchesList(list, outcomeFilter, modeFilter, limit)))
+	fmt.Fprint(w, matchesPageShell("Matches", renderMatchesList(list, outcomeFilter, modeFilter, difficultyFilter, limit)))
 }
 
-func buildMatchesFilter(outcome, mode string) (string, []interface{}) {
+func buildMatchesFilter(outcome, mode, difficulty string) (string, []interface{}) {
 	var clauses []string
 	var args []interface{}
 	i := 1
@@ -112,6 +115,11 @@ func buildMatchesFilter(outcome, mode string) (string, []interface{}) {
 	if mode == "solo" || mode == "coop" {
 		clauses = append(clauses, fmt.Sprintf("mode = $%d", i))
 		args = append(args, mode)
+		i++
+	}
+	if types.IsDifficulty(difficulty) {
+		clauses = append(clauses, fmt.Sprintf("difficulty = $%d", i))
+		args = append(args, difficulty)
 		i++
 	}
 	if len(clauses) == 0 {
@@ -146,7 +154,7 @@ func loadParticipants(ctx context.Context, matchIDs []string) map[string][]parti
 	return out
 }
 
-func renderMatchesList(list []matchRow, outcomeFilter, modeFilter string, limit int) string {
+func renderMatchesList(list []matchRow, outcomeFilter, modeFilter, difficultyFilter string, limit int) string {
 	var b strings.Builder
 
 	b.WriteString(`<form class="filters" method="get">`)
@@ -167,6 +175,19 @@ func renderMatchesList(list []matchRow, outcomeFilter, modeFilter string, limit 
 	for _, opt := range []string{"", "solo", "coop"} {
 		sel := ""
 		if opt == modeFilter {
+			sel = " selected"
+		}
+		label := opt
+		if label == "" {
+			label = "All"
+		}
+		fmt.Fprintf(&b, `<option value="%s"%s>%s</option>`, opt, sel, label)
+	}
+	b.WriteString(`</select></label>`)
+	b.WriteString(`<label>Difficulty <select name="difficulty" onchange="this.form.submit()">`)
+	for _, opt := range []string{"", types.DifficultyEasy, types.DifficultyMedium, types.DifficultyHard} {
+		sel := ""
+		if opt == difficultyFilter {
 			sel = " selected"
 		}
 		label := opt
@@ -237,7 +258,7 @@ func renderMatchesList(list []matchRow, outcomeFilter, modeFilter string, limit 
 </tr>`,
 			html.EscapeString(outcome),
 			m.EndedAt.UTC().Format("2006-01-02 15:04"),
-			html.EscapeString(m.Mode),
+			html.EscapeString(modeLabel(m)),
 			html.EscapeString(m.LevelName),
 			m.WaveReached,
 			m.Duration,
@@ -302,4 +323,12 @@ func isMissingRelation(err error) bool {
 		return pgErr.Code == "42P01"
 	}
 	return strings.Contains(strings.ToLower(err.Error()), "does not exist")
+}
+
+// modeLabel shows the difficulty next to the mode for solo matches.
+func modeLabel(m matchRow) string {
+	if m.Difficulty == "" {
+		return m.Mode
+	}
+	return m.Mode + " · " + m.Difficulty
 }

@@ -160,7 +160,7 @@ func (s *Server) HandleConnection(w http.ResponseWriter, r *http.Request) {
 	// Matchmaking queue: a coop session has no match until the matchmaker
 	// pairs it with somebody.
 	if mode == "coop" && matchID == "" {
-		genMatchID, isWaiting, notify, superseded := matchmaking.Enqueue(playerID, conn)
+		genMatchID, isWaiting, notify, superseded := matchmaking.Enqueue(playerID, sess.Difficulty, conn)
 		if isWaiting {
 			s.Hub.Send(conn, types.QueuedMessage{Type: "QUEUED", Position: 1})
 			fmt.Printf("[QUEUE] Player %s waiting for opponent\n", playerID)
@@ -234,7 +234,7 @@ func (s *Server) HandleConnection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !match.JoinMatch(matchID, playerID, mode) {
+	if !match.JoinMatch(matchID, playerID, mode, sess.Difficulty) {
 		s.Hub.Send(conn, types.ErrorMessage{Type: "ERROR", Reason: "Cannot join match (full or limit reached)"})
 		time.Sleep(200 * time.Millisecond)
 		return

@@ -11,6 +11,7 @@ import (
 
 	"space-invaders-coop/backend-go/internal/db"
 	"space-invaders-coop/backend-go/internal/game"
+	"space-invaders-coop/backend-go/internal/matchmaking"
 	"space-invaders-coop/backend-go/internal/ws"
 )
 
@@ -88,8 +89,11 @@ func (s *Server) Run() {
 func (s *Server) HandleAPIOnline(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
-	_ = json.NewEncoder(w).Encode(map[string]int{
+	// waiting tells the lobby at which difficulty someone is already queued,
+	// so a player can join them rather than wait alone on another.
+	_ = json.NewEncoder(w).Encode(map[string]any{
 		"playersOnline": s.hub.TotalPlayerCount(),
+		"waiting":       matchmaking.WaitingByDifficulty(),
 	})
 }
 
@@ -302,7 +306,7 @@ func dashboardHTML(st ServerStats, health db.HealthStatus, counts db.Counts) str
     <div class="stats-grid">
       <div class="stat-card"><h2>Active Matches</h2><div class="value">` + strconv.Itoa(st.ActiveMatches) + ` / ` + strconv.Itoa(st.MaxMatches) + `</div></div>
       <div class="stat-card"><h2>Total Players</h2><div class="value">` + strconv.Itoa(st.TotalPlayers) + `</div></div>
-      <div class="stat-card"><h2>In Queue</h2><div class="value"><a href="/queue" style="color:inherit;text-decoration:none">` + strconv.Itoa(st.QueueSize) + ` / 1</a></div></div>
+      <div class="stat-card"><h2>In Queue</h2><div class="value"><a href="/queue" style="color:inherit;text-decoration:none">` + strconv.Itoa(st.QueueSize) + ` / ` + strconv.Itoa(len(matchmaking.Difficulties)) + `</a></div></div>
       <div class="stat-card"><h2>Database</h2><div class="value" style="color:` + func() string { _, c := dbStatusBadge(health); return c }() + `;font-size:1.25rem">` + func() string { l, _ := dbStatusBadge(health); return html.EscapeString(l) }() + `</div>` + func() string {
 			if health.Error != "" {
 				return `<div style="color:#ff8888;font-size:0.75rem;margin-top:0.5rem;word-break:break-word">` + html.EscapeString(health.Error) + `</div>`

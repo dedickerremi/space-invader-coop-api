@@ -66,8 +66,8 @@ func FinalizeMatch(snap *types.MatchSnapshot) {
 			mode, level_name, wave_reached, duration_seconds, game_over,
 			started_at, outcome, bosses_killed,
 			user_agent, platform, locale, country, ip_hash,
-			ended_at
-		) VALUES ($1,$2,$3,$4,$5,to_timestamp($6::bigint / 1000.0),$7,$8,$9,$10,$11,$12,$13,to_timestamp($14::bigint / 1000.0))
+			ended_at, difficulty
+		) VALUES ($1,$2,$3,$4,$5,to_timestamp($6::bigint / 1000.0),$7,$8,$9,$10,$11,$12,$13,to_timestamp($14::bigint / 1000.0),$15)
 		RETURNING id`,
 		snap.Mode, snap.LevelName, snap.WaveReached, durSec, gameOver,
 		snap.StartedAt, snap.Outcome, bosses,
@@ -77,6 +77,7 @@ func FinalizeMatch(snap *types.MatchSnapshot) {
 		nullIfEmpty(snap.Metadata.Country),
 		nullIfEmpty(snap.Metadata.IPHash),
 		snap.EndedAt,
+		nullIfEmpty(snap.Difficulty),
 	).Scan(&summaryID)
 	if err != nil {
 		fmt.Printf("[STATS] insert summary failed for %s: %v\n", snap.MatchID, err)

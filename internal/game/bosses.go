@@ -61,6 +61,7 @@ func spawnBoss(s *types.GameState, kind string, hp int) {
 	if hp > 0 {
 		stats.maxHP = hp
 	}
+	stats.maxHP = max(1, round(float64(stats.maxHP)*difficultyOf(s).BossHP))
 	s.Boss = &types.Boss{
 		Kind:        kind,
 		X:           gameWidth / 2,

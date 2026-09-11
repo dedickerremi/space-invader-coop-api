@@ -171,6 +171,7 @@ type ParticipantSnapshot struct {
 type MatchSnapshot struct {
 	MatchID      string
 	Mode         string
+	Difficulty   string
 	Outcome      string // "victory" | "defeat" | "abandoned"
 	StartedAt    int64  // ms
 	EndedAt      int64  // ms
@@ -179,6 +180,20 @@ type MatchSnapshot struct {
 	BossesKilled []string
 	Metadata     MatchMetadata
 	Participants []ParticipantSnapshot
+}
+
+// Difficulties, for solo and coop alike. Easy is each campaign as designed;
+// Medium and Hard press harder on the same waves (see game/difficulty.go).
+// Coop players are only ever paired with someone who picked the same one.
+const (
+	DifficultyEasy   = "easy"
+	DifficultyMedium = "medium"
+	DifficultyHard   = "hard"
+)
+
+// IsDifficulty reports whether name is a known difficulty.
+func IsDifficulty(name string) bool {
+	return name == DifficultyEasy || name == DifficultyMedium || name == DifficultyHard
 }
 
 // GameState is the full game state for a match.
@@ -198,6 +213,7 @@ type GameState struct {
 	BestStreaks       map[string]int   `json:"-"`      // playerId -> max streak this match
 	LevelName         string           `json:"levelName"`
 	LevelTitle        string           `json:"levelTitle,omitempty"` // display name; levelName is the storage key
+	Difficulty        string           `json:"difficulty,omitempty"` // easy | medium | hard
 	WaveNumber        int              `json:"waveNumber"`
 	WaveName          string           `json:"waveName"`
 	TotalWaves        int              `json:"totalWaves"`
@@ -229,6 +245,8 @@ type Match struct {
 	State     GameState
 	CreatedAt int64
 	Mode      string // "solo" or "coop"
+	// Difficulty is the difficulty the match is played at.
+	Difficulty string
 
 	// Client metadata captured from the first WS handshake. Snapshot
 	// fields — never mutated after the first fill.

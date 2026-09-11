@@ -4,10 +4,12 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"space-invaders-coop/backend-go/internal/types"
 )
 
 func TestNewSessionAssignsIdentity(t *testing.T) {
-	coop, err := NewSession("coop")
+	coop, err := NewSession("coop", "")
 	if err != nil {
 		t.Fatalf("NewSession: %v", err)
 	}
@@ -18,7 +20,7 @@ func TestNewSessionAssignsIdentity(t *testing.T) {
 		t.Errorf("coop session should have no match until the matchmaker pairs it, got %q", coop.MatchID)
 	}
 
-	solo, err := NewSession("solo")
+	solo, err := NewSession("solo", "")
 	if err != nil {
 		t.Fatalf("NewSession: %v", err)
 	}
@@ -28,7 +30,7 @@ func TestNewSessionAssignsIdentity(t *testing.T) {
 }
 
 func TestNewSessionRejectsCallerSuppliedMode(t *testing.T) {
-	s, err := NewSession("admin")
+	s, err := NewSession("admin", "")
 	if err != nil {
 		t.Fatalf("NewSession: %v", err)
 	}
@@ -40,7 +42,7 @@ func TestNewSessionRejectsCallerSuppliedMode(t *testing.T) {
 func TestSessionsAreUnique(t *testing.T) {
 	seen := make(map[string]bool)
 	for i := 0; i < 200; i++ {
-		s, err := NewSession("coop")
+		s, err := NewSession("coop", "")
 		if err != nil {
 			t.Fatalf("NewSession: %v", err)
 		}
@@ -52,7 +54,7 @@ func TestSessionsAreUnique(t *testing.T) {
 }
 
 func TestLookupSession(t *testing.T) {
-	s, _ := NewSession("coop")
+	s, _ := NewSession("coop", "")
 
 	if got := LookupSession(s.Token); got == nil || got.PlayerID != s.PlayerID {
 		t.Error("a freshly minted token should resolve")
@@ -66,7 +68,7 @@ func TestLookupSession(t *testing.T) {
 }
 
 func TestLookupSessionRejectsExpired(t *testing.T) {
-	s, _ := NewSession("coop")
+	s, _ := NewSession("coop", "")
 
 	sessMu.Lock()
 	sessions[s.Token].CreatedAt = time.Now().Add(-sessionTTL - time.Second)
@@ -85,7 +87,7 @@ func TestLookupSessionRejectsExpired(t *testing.T) {
 }
 
 func TestLookupSessionReturnsCopy(t *testing.T) {
-	s, _ := NewSession("coop")
+	s, _ := NewSession("coop", "")
 	got := LookupSession(s.Token)
 	got.PlayerID = "p_tampered"
 
@@ -95,7 +97,7 @@ func TestLookupSessionReturnsCopy(t *testing.T) {
 }
 
 func TestBindSessionMatch(t *testing.T) {
-	s, _ := NewSession("coop")
+	s, _ := NewSession("coop", "")
 	BindSessionMatch(s.Token, "m_abc")
 
 	got := LookupSession(s.Token)
@@ -111,9 +113,9 @@ func TestBindSessionMatch(t *testing.T) {
 }
 
 func TestDropSessionsForMatch(t *testing.T) {
-	a, _ := NewSession("coop")
-	b, _ := NewSession("coop")
-	other, _ := NewSession("coop")
+	a, _ := NewSession("coop", "")
+	b, _ := NewSession("coop", "")
+	other, _ := NewSession("coop", "")
 	BindSessionMatch(a.Token, "m_done")
 	BindSessionMatch(b.Token, "m_done")
 	BindSessionMatch(other.Token, "m_live")
@@ -128,9 +130,27 @@ func TestDropSessionsForMatch(t *testing.T) {
 	}
 
 	// An empty match id would otherwise match every unbound coop session.
-	unbound, _ := NewSession("coop")
+	unbound, _ := NewSession("coop", "")
 	DropSessionsForMatch("")
 	if LookupSession(unbound.Token) == nil {
 		t.Error("dropping the empty match id must not wipe unbound sessions")
+	}
+}
+
+func TestSessionDifficulty(t *testing.T) {
+	cases := []struct{ mode, asked, want string }{
+		{"solo", "hard", types.DifficultyHard},
+		{"coop", "medium", types.DifficultyMedium},
+		{"solo", "", types.DifficultyEasy},
+		{"coop", "nightmare", types.DifficultyEasy},
+	}
+	for _, c := range cases {
+		s, err := NewSession(c.mode, c.asked)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if s.Difficulty != c.want {
+			t.Errorf("NewSession(%q, %q).Difficulty = %q, want %q", c.mode, c.asked, s.Difficulty, c.want)
+		}
 	}
 }

@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"space-invaders-coop/backend-go/internal/types"
 )
 
 // campaignBrief is the design brief each campaign is tuned against: target
@@ -169,67 +171,73 @@ func collide(a, b GroupDefinition, width int) string {
 	return ""
 }
 
-// TestCampaignsPlayThrough plays every campaign start to finish with a bot
+// TestCampaignsPlayThrough plays every campaign, at every difficulty, start to finish with a bot
 // that shoots each enemy a second after it settles, and checks nothing
 // stalls: every wave ends, every boss appears, and the last level is a win.
 func TestCampaignsPlayThrough(t *testing.T) {
+	for mode := range campaignBrief {
+		for _, difficulty := range []string{types.DifficultyEasy, types.DifficultyMedium, types.DifficultyHard} {
+			t.Run(mode+"/"+difficulty, func(t *testing.T) {
+				playThrough(t, mode, difficulty)
+			})
+		}
+	}
+}
+
+func playThrough(t *testing.T, mode, difficulty string) {
 	const reaction = 30           // ticks an enemy survives once settled
 	const bossFight = 20 * 30     // ticks the bot takes to down a boss
 	const maxTicks = 60 * 60 * 30 // an hour of game time: anything longer is a stall
+	names := CampaignLevels(mode)
+	scripted := 0
+	for _, n := range names {
+		scripted += len(carriersIn(GetLevelByName(n)))
+	}
+	s := newWaveState(names[0])
+	s.Difficulty = difficulty
+	var bosses []string
+	levelStart, bossTicks := 0, 0
+	level := s.LevelName
 
-	for mode := range campaignBrief {
-		t.Run(mode, func(t *testing.T) {
-			names := CampaignLevels(mode)
-			scripted := 0
-			for _, n := range names {
-				scripted += len(carriersIn(GetLevelByName(n)))
-			}
-			s := newWaveState(names[0])
-			var bosses []string
-			levelStart, bossTicks := 0, 0
-			level := s.LevelName
+	tick := 0
+	for ; tick < maxTicks && !s.Victory; tick++ {
+		tickWaveSpawning(s)
+		tickEnemyAI(s)
 
-			tick := 0
-			for ; tick < maxTicks && !s.Victory; tick++ {
-				tickWaveSpawning(s)
-				tickEnemyAI(s)
+		kept := s.Enemies[:0]
+		for _, e := range s.Enemies {
+			settled := e.EntryTick >= e.EntryDur
+			dead := settled && (e.Hold && e.HoldTick >= reaction || !e.Hold && e.Y >= e.SlotY+reaction)
+			if !dead {
+				kept = append(kept, e)
+			}
+		}
+		s.Enemies = kept
 
-				kept := s.Enemies[:0]
-				for _, e := range s.Enemies {
-					settled := e.EntryTick >= e.EntryDur
-					dead := settled && (e.Hold && e.HoldTick >= reaction || !e.Hold && e.Y >= e.SlotY+reaction)
-					if !dead {
-						kept = append(kept, e)
-					}
-				}
-				s.Enemies = kept
+		if s.Boss != nil {
+			if bossTicks == 0 {
+				bosses = append(bosses, s.Boss.Kind)
+			}
+			if bossTicks++; bossTicks >= bossFight {
+				onBossKilled(s, "p1")
+				bossTicks = 0
+			}
+		}
 
-				if s.Boss != nil {
-					if bossTicks == 0 {
-						bosses = append(bosses, s.Boss.Kind)
-					}
-					if bossTicks++; bossTicks >= bossFight {
-						onBossKilled(s, "p1")
-						bossTicks = 0
-					}
-				}
-
-				if s.LevelName != level || s.Victory {
-					t.Logf("%s cleared in %s", level, time.Duration(tick-levelStart)*time.Second/30)
-					level, levelStart = s.LevelName, tick
-				}
-			}
-			if !s.Victory {
-				t.Fatalf("%s campaign stalled at %s wave %d after %d ticks", mode, s.LevelName, s.WaveNumber, tick)
-			}
-			// Carriers are never ticked here, so every launched one is still listed.
-			if len(s.Carriers) != scripted {
-				t.Fatalf("%d of %d scripted carriers launched", len(s.Carriers), scripted)
-			}
-			want := campaignBosses[1:]
-			if strings.Join(bosses, ",") != strings.Join(want, ",") {
-				t.Fatalf("bosses fought %v, want %v", bosses, want)
-			}
-		})
+		if s.LevelName != level || s.Victory {
+			t.Logf("%s cleared in %s", level, time.Duration(tick-levelStart)*time.Second/30)
+			level, levelStart = s.LevelName, tick
+		}
+	}
+	if !s.Victory {
+		t.Fatalf("%s/%s campaign stalled at %s wave %d after %d ticks", mode, difficulty, s.LevelName, s.WaveNumber, tick)
+	}
+	// Carriers are never ticked here, so every launched one is still listed.
+	if len(s.Carriers) != scripted {
+		t.Fatalf("%d of %d scripted carriers launched", len(s.Carriers), scripted)
+	}
+	want := campaignBosses[1:]
+	if strings.Join(bosses, ",") != strings.Join(want, ",") {
+		t.Fatalf("bosses fought %v, want %v", bosses, want)
 	}
 }
