@@ -14,3 +14,9 @@ go.work
 
 # OS
 .DS_Store
+
+# Environment — every env file except a documented template. Fly holds
+# DATABASE_URL, CLERK_SECRET_KEY and IP_HASH_SALT; a local .env with the same
+# values must never reach this public repo.
+.env*
+!.env.example
